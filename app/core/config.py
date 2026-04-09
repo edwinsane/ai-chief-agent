@@ -18,6 +18,10 @@ class Settings:
     llm_model: str = os.getenv("LLM_MODEL", "gpt-4o-mini")
     llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0"))
 
+    # News providers
+    newsapi_key: str = field(default_factory=lambda: os.getenv("NEWSAPI_KEY", ""))
+    fetch_limit: int = int(os.getenv("FETCH_LIMIT", "25"))
+
     # Database
     database_url: str = os.getenv("DATABASE_URL", "sqlite:///data/agents.db")
 
@@ -32,6 +36,11 @@ class Settings:
     def llm_enabled(self) -> bool:
         """True when a valid API key is configured."""
         return bool(self.openai_api_key and self.openai_api_key != "sk-your-key-here")
+
+    @property
+    def newsapi_enabled(self) -> bool:
+        """True when a NewsAPI key is configured."""
+        return bool(self.newsapi_key and self.newsapi_key != "your-newsapi-key-here")
 
 
 # Singleton instance — import this wherever config is needed

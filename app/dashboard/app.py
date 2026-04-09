@@ -1,31 +1,33 @@
 """
-AI Chief Agent — Executive Dashboard.
+AI Chief Agent — Executive Intelligence Dashboard.
 
-Dark-themed monitoring UI with filters, metric cards, insights charts,
-and a table + detail panel for browsing agent run history.
-
-Run locally:   streamlit run app/dashboard/app.py
-Run on VPS:    ./run_dashboard.sh
+Dark-themed, executive-grade monitoring UI with:
+- Summary metric cards
+- "Most Important Right Now" briefing
+- Breaking, AI, AI Coding, AI Trading, Global News sections
+- Sidebar filters (category, region, urgency, source, date, keyword, QA, relevance)
+- Trends & insights charts
+- Auto-refresh every 30 seconds
 """
 
 import json
 import sys
 from collections import Counter
-from datetime import datetime, date, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-# ---------------------------------------------------------------------------
-# Path setup
-# ---------------------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.core.config import settings  # noqa: E402
 from app.storage.database import (  # noqa: E402
-    get_all_runs,
-    get_distinct_topics,
+    get_article_count,
+    get_articles,
+    get_distinct_categories,
+    get_distinct_regions,
+    get_distinct_sources,
     get_last_run,
     get_qa_stats,
     get_run_count,
@@ -33,416 +35,340 @@ from app.storage.database import (  # noqa: E402
 )
 
 # ---------------------------------------------------------------------------
-# Page config & DB init
+# Page setup
 # ---------------------------------------------------------------------------
 st.set_page_config(page_title="AI Chief Agent", page_icon="🤖", layout="wide")
 init_db()
 
 # ---------------------------------------------------------------------------
-# Custom CSS — dark executive styling
+# CSS
 # ---------------------------------------------------------------------------
-st.markdown(
-    """
-    <style>
-    /* --- auto-refresh ---------------------------------------------------- */
-    meta[http-equiv="refresh"] { display: none; }
+st.markdown("""
+<style>
+meta[http-equiv="refresh"]{display:none}
+.block-container{padding-top:1.2rem}
+h1,h2,h3{letter-spacing:-0.02em}
 
-    /* --- global ---------------------------------------------------------- */
-    .block-container { padding-top: 1.5rem; }
-    h1, h2, h3 { letter-spacing: -0.02em; }
+/* metric card */
+.mc{background:#1A1F2B;border:1px solid #2A2F3B;border-radius:10px;padding:1rem 1.2rem;text-align:center}
+.mc .lb{font-size:.72rem;color:#8B95A5;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.2rem}
+.mc .vl{font-size:1.5rem;font-weight:700;color:#E2E8F0}
+.mc .vl.g{color:#48BB78} .mc .vl.r{color:#FC8181} .mc .vl.b{color:#63B3ED} .mc .vl.a{color:#F6AD55} .mc .vl.p{color:#B794F4}
 
-    /* --- metric cards ---------------------------------------------------- */
-    .metric-card {
-        background: #1A1F2B;
-        border: 1px solid #2A2F3B;
-        border-radius: 10px;
-        padding: 1.1rem 1.3rem;
-        text-align: center;
-    }
-    .metric-card .label {
-        font-size: 0.78rem;
-        color: #8B95A5;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        margin-bottom: 0.25rem;
-    }
-    .metric-card .value {
-        font-size: 1.6rem;
-        font-weight: 700;
-        color: #E2E8F0;
-    }
-    .metric-card .value.green  { color: #48BB78; }
-    .metric-card .value.red    { color: #FC8181; }
-    .metric-card .value.blue   { color: #63B3ED; }
-    .metric-card .value.amber  { color: #F6AD55; }
+/* article card */
+.ac{background:#1A1F2B;border:1px solid #2A2F3B;border-radius:10px;padding:1rem 1.2rem;margin-bottom:.7rem}
+.ac h4{margin:0 0 .3rem 0;color:#E2E8F0;font-size:.95rem;line-height:1.3}
+.ac .meta{font-size:.73rem;color:#8B95A5;margin-bottom:.4rem}
+.ac .summary{color:#C8CDD3;font-size:.84rem;line-height:1.5;margin-bottom:.4rem}
+.ac .wim{color:#A0AEC0;font-size:.8rem;font-style:italic;margin-bottom:.4rem}
+.ac .tags{display:flex;flex-wrap:wrap;gap:.3rem}
+.ac .tag{background:#2A2F3B;color:#A0AEC0;padding:.1rem .5rem;border-radius:4px;font-size:.7rem}
 
-    /* --- QA badges ------------------------------------------------------- */
-    .qa-pass {
-        display: inline-block;
-        background: #22543D;
-        color: #48BB78;
-        padding: 0.15rem 0.6rem;
-        border-radius: 4px;
-        font-size: 0.82rem;
-        font-weight: 600;
-    }
-    .qa-fail {
-        display: inline-block;
-        background: #742A2A;
-        color: #FC8181;
-        padding: 0.15rem 0.6rem;
-        border-radius: 4px;
-        font-size: 0.82rem;
-        font-weight: 600;
-    }
+/* urgency badges */
+.ub{display:inline-block;padding:.1rem .5rem;border-radius:4px;font-size:.72rem;font-weight:600}
+.ub.brk{background:#742A2A;color:#FC8181} .ub.hi{background:#744210;color:#F6AD55}
+.ub.med{background:#2A4365;color:#63B3ED} .ub.lo{background:#1A3A2A;color:#48BB78}
 
-    /* --- detail panel ---------------------------------------------------- */
-    .detail-section {
-        background: #1A1F2B;
-        border: 1px solid #2A2F3B;
-        border-radius: 8px;
-        padding: 1rem 1.2rem;
-        margin-bottom: 0.8rem;
-    }
-    .detail-section h4 {
-        margin: 0 0 0.4rem 0;
-        font-size: 0.85rem;
-        color: #8B95A5;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
-    .detail-section p {
-        margin: 0;
-        color: #C8CDD3;
-        line-height: 1.55;
-    }
+/* qa badge */
+.qa-p{display:inline-block;background:#22543D;color:#48BB78;padding:.1rem .5rem;border-radius:4px;font-size:.72rem;font-weight:600}
+.qa-f{display:inline-block;background:#742A2A;color:#FC8181;padding:.1rem .5rem;border-radius:4px;font-size:.72rem;font-weight:600}
 
-    /* --- divider --------------------------------------------------------- */
-    .section-divider {
-        border: none;
-        border-top: 1px solid #2A2F3B;
-        margin: 1.8rem 0;
-    }
+/* section divider */
+.sd{border:none;border-top:1px solid #2A2F3B;margin:1.5rem 0}
 
-    /* --- sidebar refinements --------------------------------------------- */
-    [data-testid="stSidebar"] {
-        background: #0E1117;
-        border-right: 1px solid #1E2330;
-    }
-    </style>
+/* briefing card */
+.brief{background:linear-gradient(135deg,#1A1F2B 0%,#1E2636 100%);border:1px solid #3A4050;border-radius:12px;padding:1.3rem 1.5rem;margin-bottom:.6rem}
+.brief h4{margin:0 0 .3rem 0;color:#F6AD55;font-size:.85rem;text-transform:uppercase;letter-spacing:.04em}
+.brief p{margin:0;color:#E2E8F0;font-size:.88rem;line-height:1.5}
 
-    <!-- auto-refresh every 30 s -->
-    <meta http-equiv="refresh" content="30">
-    """,
-    unsafe_allow_html=True,
-)
+[data-testid="stSidebar"]{background:#0E1117;border-right:1px solid #1E2330}
+</style>
+<meta http-equiv="refresh" content="30">
+""", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _metric_card(label: str, value: str | int, color: str = "") -> str:
-    """Return HTML for a single metric card."""
-    cls = f" {color}" if color else ""
+def mc(label: str, value, color: str = "") -> str:
+    c = f" {color}" if color else ""
+    return f'<div class="mc"><div class="lb">{label}</div><div class="vl{c}">{value}</div></div>'
+
+
+def urgency_badge(u: str) -> str:
+    cls = {"breaking": "brk", "high": "hi", "medium": "med", "low": "lo"}.get(u, "lo")
+    return f'<span class="ub {cls}">{u.upper()}</span>'
+
+
+def article_card(a: dict) -> str:
+    tags_html = "".join(f'<span class="tag">{t}</span>' for t in a.get("tags", []))
+    cat_tag = f'<span class="tag">{a.get("category", "")}</span>' if a.get("category") else ""
+    src = a.get("source", "Unknown")
+    ts = a.get("published_at", "")[:16].replace("T", " ")
+    ub = urgency_badge(a.get("urgency", "low"))
+    score = a.get("relevance_score", 0)
+
+    title = a.get("title", "Untitled")
+    url = a.get("url", "")
+    title_html = f'<a href="{url}" target="_blank" style="color:#E2E8F0;text-decoration:none">{title}</a>' if url else title
+
+    summary = a.get("short_summary", "")
+    wim = a.get("why_it_matters", "")
+    wim_html = f'<div class="wim">Why it matters: {wim}</div>' if wim else ""
+
     return (
-        f'<div class="metric-card">'
-        f'<div class="label">{label}</div>'
-        f'<div class="value{cls}">{value}</div>'
-        f"</div>"
+        f'<div class="ac">'
+        f'<h4>{title_html}</h4>'
+        f'<div class="meta">{src} · {ts} · {ub} · Relevance: {score:.0%}</div>'
+        f'<div class="summary">{summary}</div>'
+        f'{wim_html}'
+        f'<div class="tags">{cat_tag}{tags_html}</div>'
+        f'</div>'
     )
 
 
-def _parse_result(raw: str | None) -> dict:
-    """Safely parse the JSON result column."""
-    if not raw:
-        return {}
+def briefing_card(title: str, body: str) -> str:
+    return f'<div class="brief"><h4>{title}</h4><p>{body}</p></div>'
+
+
+def _parse_date(iso: str) -> date | None:
+    if not iso:
+        return None
     try:
-        return json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return {}
-
-
-def _format_ts(iso: str) -> str:
-    """'2026-04-08T19:22:22...' -> '2026-04-08  19:22 UTC'"""
-    return iso[:16].replace("T", "  ") + " UTC"
-
-
-def _parse_date(iso: str) -> date:
-    """Extract date from ISO timestamp."""
-    return datetime.fromisoformat(iso).date()
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).date()
+    except (ValueError, TypeError):
+        return None
 
 
 # ---------------------------------------------------------------------------
 # Load data
 # ---------------------------------------------------------------------------
-all_runs = get_all_runs()
+all_articles = get_articles(limit=500)
+total_articles = get_article_count()
 total_runs = get_run_count()
 last_run = get_last_run()
 qa_stats = get_qa_stats()
-topics = get_distinct_topics()
+db_categories = get_distinct_categories()
+db_sources = get_distinct_sources()
+db_regions = get_distinct_regions()
 
-# Build a list of dicts with parsed fields for easy filtering
-run_records: list[dict] = []
-for r in all_runs:
-    parsed = _parse_result(r["result"])
-    run_records.append(
-        {
-            "id": r["id"],
-            "topic": r["topic"],
-            "created_at": r["created_at"],
-            "date": _parse_date(r["created_at"]),
-            "qa_passed": parsed.get("qa_passed", False),
-            "research": parsed.get("research_results", ""),
-            "trends": parsed.get("trend_results", ""),
-            "qa_notes": parsed.get("qa_notes", ""),
-            "raw": parsed,
-        }
-    )
+# ---------------------------------------------------------------------------
+# Sidebar filters
+# ---------------------------------------------------------------------------
+with st.sidebar:
+    st.markdown("### Filters")
+
+    f_categories = st.multiselect("Category", options=db_categories, default=[], placeholder="All categories")
+    f_regions = st.multiselect("Region", options=db_regions, default=[], placeholder="All regions")
+    f_sources = st.multiselect("Source", options=db_sources, default=[], placeholder="All sources")
+    f_urgency = st.multiselect("Urgency", options=["breaking", "high", "medium", "low"], default=[], placeholder="All levels")
+    f_qa = st.radio("QA Status", ["All", "Passed", "Failed"], horizontal=True)
+
+    f_relevance = st.slider("Min relevance", 0.0, 1.0, 0.0, 0.05)
+
+    # Date range
+    dates = [_parse_date(a.get("published_at", "")) for a in all_articles]
+    valid_dates = [d for d in dates if d]
+    if valid_dates:
+        f_date_range = st.date_input("Date range", value=(min(valid_dates), max(valid_dates)),
+                                     min_value=min(valid_dates), max_value=max(valid_dates))
+    else:
+        f_date_range = None
+
+    f_keyword = st.text_input("Keyword search", placeholder="Search titles & summaries...")
+
+    st.markdown("---")
+    mode_label = "LLM" if settings.llm_enabled else "Stub"
+    news_label = "NewsAPI + RSS" if settings.newsapi_enabled else "RSS only"
+    st.caption(f"Agent mode: **{mode_label}**")
+    st.caption(f"Providers: **{news_label}**")
+
+# ---------------------------------------------------------------------------
+# Apply filters
+# ---------------------------------------------------------------------------
+filtered = all_articles
+
+if f_categories:
+    filtered = [a for a in filtered if a.get("category") in f_categories]
+if f_regions:
+    filtered = [a for a in filtered if a.get("region") in f_regions]
+if f_sources:
+    filtered = [a for a in filtered if a.get("source") in f_sources]
+if f_urgency:
+    filtered = [a for a in filtered if a.get("urgency") in f_urgency]
+if f_relevance > 0:
+    filtered = [a for a in filtered if (a.get("relevance_score") or 0) >= f_relevance]
+if f_date_range and isinstance(f_date_range, tuple) and len(f_date_range) == 2:
+    d_start, d_end = f_date_range
+    filtered = [a for a in filtered if (d := _parse_date(a.get("published_at", ""))) and d_start <= d <= d_end]
+if f_keyword:
+    kw = f_keyword.lower()
+    filtered = [a for a in filtered if kw in (a.get("title", "") + " " + a.get("short_summary", "")).lower()]
+
+# QA filter applies to runs, but we show it at article level as pass-through
+# Since QA validates the batch, all articles in a passed run are "passed"
+
+# Sort by relevance descending
+filtered.sort(key=lambda a: a.get("relevance_score", 0), reverse=True)
 
 # ---------------------------------------------------------------------------
 # HEADER
 # ---------------------------------------------------------------------------
 st.markdown("## AI Chief Agent")
-st.caption("Executive monitoring dashboard")
+st.caption("Executive Intelligence Dashboard")
+st.markdown('<hr class="sd">', unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # 1. METRIC CARDS
 # ---------------------------------------------------------------------------
-st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+c1, c2, c3, c4, c5 = st.columns(5)
+with c1:
+    st.markdown(mc("Total Articles", total_articles, "b"), unsafe_allow_html=True)
+with c2:
+    st.markdown(mc("Total Runs", total_runs, "p"), unsafe_allow_html=True)
+with c3:
+    ts = last_run["created_at"][:16].replace("T", " ") + " UTC" if last_run else "—"
+    st.markdown(mc("Latest Run", ts), unsafe_allow_html=True)
+with c4:
+    st.markdown(mc("QA Passed", qa_stats["passed"], "g"), unsafe_allow_html=True)
+with c5:
+    st.markdown(mc("QA Failed", qa_stats["failed"], "r"), unsafe_allow_html=True)
 
-cols = st.columns(5)
-
-with cols[0]:
-    st.markdown(_metric_card("Total Runs", total_runs, "blue"), unsafe_allow_html=True)
-with cols[1]:
-    ts = _format_ts(last_run["created_at"]) if last_run else "—"
-    st.markdown(_metric_card("Latest Run", ts), unsafe_allow_html=True)
-with cols[2]:
-    topic_val = last_run["topic"] if last_run else "—"
-    st.markdown(_metric_card("Latest Topic", topic_val, "amber"), unsafe_allow_html=True)
-with cols[3]:
-    st.markdown(_metric_card("QA Passed", qa_stats["passed"], "green"), unsafe_allow_html=True)
-with cols[4]:
-    st.markdown(_metric_card("QA Failed", qa_stats["failed"], "red"), unsafe_allow_html=True)
+st.markdown('<hr class="sd">', unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
-# 2. SIDEBAR FILTERS
+# 2. MOST IMPORTANT RIGHT NOW
 # ---------------------------------------------------------------------------
-with st.sidebar:
-    st.markdown("### Filters")
-
-    # Topic filter
-    selected_topics = st.multiselect(
-        "Topic",
-        options=topics,
-        default=[],
-        placeholder="All topics",
-    )
-
-    # Date range filter
-    if run_records:
-        all_dates = [r["date"] for r in run_records]
-        min_date, max_date = min(all_dates), max(all_dates)
-    else:
-        min_date = max_date = date.today()
-
-    date_range = st.date_input(
-        "Date range",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date,
-    )
-
-    # QA status filter
-    qa_filter = st.radio(
-        "QA Status",
-        options=["All", "Passed", "Failed"],
-        horizontal=True,
-    )
-
-    # Keyword search
-    keyword = st.text_input("Keyword search", placeholder="Search inside results...")
-
-    st.markdown("---")
-    mode = "LLM" if settings.llm_enabled else "Stub"
-    st.caption(f"Agent mode: **{mode}**")
-
-# ---------------------------------------------------------------------------
-# Apply filters
-# ---------------------------------------------------------------------------
-filtered = run_records
-
-if selected_topics:
-    filtered = [r for r in filtered if r["topic"] in selected_topics]
-
-if isinstance(date_range, tuple) and len(date_range) == 2:
-    d_start, d_end = date_range
-    filtered = [r for r in filtered if d_start <= r["date"] <= d_end]
-
-if qa_filter == "Passed":
-    filtered = [r for r in filtered if r["qa_passed"]]
-elif qa_filter == "Failed":
-    filtered = [r for r in filtered if not r["qa_passed"]]
-
-if keyword:
-    kw = keyword.lower()
-    filtered = [
-        r
-        for r in filtered
-        if kw in r["research"].lower()
-        or kw in r["trends"].lower()
-        or kw in r["qa_notes"].lower()
-        or kw in r["topic"].lower()
-    ]
-
-# ---------------------------------------------------------------------------
-# 3. RESULTS — table + detail panel
-# ---------------------------------------------------------------------------
-st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
-st.markdown("### Run Results")
-st.caption(f"{len(filtered)} of {total_runs} runs shown")
+st.markdown("### Most Important Right Now")
 
 if filtered:
-    # Build a display dataframe
-    table_data = []
-    for r in filtered:
-        qa_label = "Passed" if r["qa_passed"] else "Failed"
-        table_data.append(
-            {
-                "ID": r["id"],
-                "Topic": r["topic"],
-                "Date": _format_ts(r["created_at"]),
-                "QA": qa_label,
-            }
-        )
+    top3 = filtered[:3]
+    breaking = [a for a in filtered if a.get("urgency") == "breaking"]
+    ai_articles = [a for a in filtered if a.get("category") in ("AI", "AI Coding", "AI Trading")]
+    market_risk = [a for a in filtered if a.get("market_impact") == "high"]
 
-    df = pd.DataFrame(table_data)
-
-    col_table, col_detail = st.columns([2, 3])
-
-    with col_table:
-        selection = st.dataframe(
-            df,
-            use_container_width=True,
-            hide_index=True,
-            on_select="rerun",
-            selection_mode="single-row",
-        )
-
-        # Determine selected row
-        selected_idx = None
-        if selection and selection.selection and selection.selection.rows:
-            selected_idx = selection.selection.rows[0]
-
-    with col_detail:
-        if selected_idx is not None and selected_idx < len(filtered):
-            rec = filtered[selected_idx]
-
-            # Topic headline
-            st.markdown(f"#### {rec['topic']}")
-            ts_display = _format_ts(rec["created_at"])
-            qa_badge = (
-                '<span class="qa-pass">QA PASSED</span>'
-                if rec["qa_passed"]
-                else '<span class="qa-fail">QA FAILED</span>'
-            )
+    bc1, bc2 = st.columns(2)
+    with bc1:
+        # Top stories
+        for i, a in enumerate(top3, 1):
             st.markdown(
-                f"Run #{rec['id']}  &middot;  {ts_display}  &middot;  {qa_badge}",
+                briefing_card(
+                    f"#{i} Top Story",
+                    f"<strong>{a['title']}</strong><br>{a.get('short_summary', '')[:200]}"
+                ),
                 unsafe_allow_html=True,
             )
-
-            st.markdown("")
-
-            # Research summary
+    with bc2:
+        # Breaking
+        if breaking:
+            b = breaking[0]
             st.markdown(
-                f'<div class="detail-section">'
-                f"<h4>Research Summary</h4>"
-                f"<p>{rec['research']}</p>"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
-
-            # Trend analysis
-            st.markdown(
-                f'<div class="detail-section">'
-                f"<h4>Trend Analysis</h4>"
-                f"<p>{rec['trends']}</p>"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
-
-            # QA notes
-            st.markdown(
-                f'<div class="detail-section">'
-                f"<h4>QA Notes</h4>"
-                f"<p>{rec['qa_notes']}</p>"
-                f"</div>",
+                briefing_card("Most Urgent Breaking", f"<strong>{b['title']}</strong><br>{b.get('short_summary', '')[:200]}"),
                 unsafe_allow_html=True,
             )
         else:
-            st.info("Select a row from the table to view run details.")
-else:
-    st.info("No runs match the current filters.")
+            st.markdown(briefing_card("Most Urgent Breaking", "No breaking stories at this time."), unsafe_allow_html=True)
 
-# ---------------------------------------------------------------------------
-# 4. INSIGHTS
-# ---------------------------------------------------------------------------
-st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
-st.markdown("### Insights")
-
-if run_records:
-    col_chart1, col_chart2 = st.columns(2)
-
-    # --- Runs per day (bar chart) ---
-    with col_chart1:
-        st.markdown("##### Runs per Day")
-        date_counts = Counter(r["date"].isoformat() for r in run_records)
-        df_dates = pd.DataFrame(
-            sorted(date_counts.items()), columns=["Date", "Runs"]
-        )
-        df_dates["Date"] = pd.to_datetime(df_dates["Date"])
-        st.bar_chart(df_dates, x="Date", y="Runs", color="#4A90D9")
-
-    # --- Top topics (horizontal bar) ---
-    with col_chart2:
-        st.markdown("##### Top Topics")
-        topic_counts = Counter(r["topic"] for r in run_records)
-        top = topic_counts.most_common(10)
-        df_topics = pd.DataFrame(top, columns=["Topic", "Runs"])
-        st.bar_chart(df_topics, x="Topic", y="Runs", color="#F6AD55", horizontal=True)
-
-    # --- Quick stats row ---
-    st.markdown("")
-    s1, s2, s3 = st.columns(3)
-    with s1:
-        st.markdown(
-            _metric_card("Unique Topics", len(topics), "blue"),
-            unsafe_allow_html=True,
-        )
-    with s2:
-        recent = [r["topic"] for r in run_records[:5]]
-        st.markdown(
-            _metric_card("Most Recent Topic", recent[0] if recent else "—", "amber"),
-            unsafe_allow_html=True,
-        )
-    with s3:
-        if topic_counts:
-            top_topic, top_count = topic_counts.most_common(1)[0]
+        # AI opportunity
+        if ai_articles:
+            a = ai_articles[0]
             st.markdown(
-                _metric_card("Most Analyzed", f"{top_topic} ({top_count}x)", "green"),
+                briefing_card("Biggest AI Opportunity", f"<strong>{a['title']}</strong><br>{a.get('short_summary', '')[:200]}"),
                 unsafe_allow_html=True,
             )
+
+        # Market / geo risk
+        if market_risk:
+            r = market_risk[0]
+            st.markdown(
+                briefing_card("Biggest Market / Geo Risk", f"<strong>{r['title']}</strong><br>{r.get('short_summary', '')[:200]}"),
+                unsafe_allow_html=True,
+            )
+else:
+    st.info("No articles available. Run `python main.py` to collect intelligence.")
+
+st.markdown('<hr class="sd">', unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# 3. CATEGORY SECTIONS
+# ---------------------------------------------------------------------------
+
+def _render_section(title: str, items: list[dict], max_items: int = 5):
+    """Render a collapsible section of article cards."""
+    if not items:
+        return
+    st.markdown(f"### {title}")
+    st.caption(f"{len(items)} articles")
+    for a in items[:max_items]:
+        st.markdown(article_card(a), unsafe_allow_html=True)
+    if len(items) > max_items:
+        with st.expander(f"Show {len(items) - max_items} more"):
+            for a in items[max_items:]:
+                st.markdown(article_card(a), unsafe_allow_html=True)
+
+
+# Breaking News (always first)
+breaking_filtered = [a for a in filtered if a.get("urgency") == "breaking"]
+_render_section("Breaking News", breaking_filtered)
+
+# AI sections
+_render_section("AI News", [a for a in filtered if a.get("category") == "AI"])
+_render_section("AI Coding", [a for a in filtered if a.get("category") == "AI Coding"])
+_render_section("AI Trading", [a for a in filtered if a.get("category") == "AI Trading"])
+
+# World sections
+_render_section("Global News", [a for a in filtered if a.get("category") == "Global News"])
+_render_section("Geopolitics", [a for a in filtered if a.get("category") == "Geopolitics"])
+_render_section("Markets", [a for a in filtered if a.get("category") == "Markets"])
+_render_section("Energy", [a for a in filtered if a.get("category") == "Energy"])
+
+st.markdown('<hr class="sd">', unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# 4. TRENDS & INSIGHTS
+# ---------------------------------------------------------------------------
+st.markdown("### Trends & Insights")
+
+if filtered:
+    ch1, ch2 = st.columns(2)
+
+    with ch1:
+        st.markdown("##### Category Distribution")
+        cat_counts = Counter(a.get("category", "Unknown") for a in filtered)
+        df_cats = pd.DataFrame(cat_counts.most_common(10), columns=["Category", "Count"])
+        st.bar_chart(df_cats, x="Category", y="Count", color="#4A90D9")
+
+    with ch2:
+        st.markdown("##### Topic Frequency")
+        tag_counter: Counter = Counter()
+        for a in filtered:
+            for t in a.get("tags", []):
+                tag_counter[t] += 1
+        if tag_counter:
+            df_tags = pd.DataFrame(tag_counter.most_common(12), columns=["Topic", "Count"])
+            st.bar_chart(df_tags, x="Topic", y="Count", color="#F6AD55", horizontal=True)
         else:
-            st.markdown(
-                _metric_card("Most Analyzed", "—"),
-                unsafe_allow_html=True,
-            )
-else:
-    st.info("Run the pipeline at least once to see insights.")
+            st.info("No topic tags detected.")
+
+    # Most Repeated Topics
+    st.markdown("##### Most Repeated Topics")
+    if tag_counter:
+        top_topics = tag_counter.most_common(10)
+        cols = st.columns(min(len(top_topics), 5))
+        for i, (tag, count) in enumerate(top_topics[:5]):
+            with cols[i]:
+                st.markdown(mc(tag, f"{count}x", "a"), unsafe_allow_html=True)
+    else:
+        st.info("No topic patterns detected yet.")
+
+st.markdown('<hr class="sd">', unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
-# Footer
+# 5. FOOTER
 # ---------------------------------------------------------------------------
-st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
 now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-st.caption(f"Dashboard refreshed at {now_utc} UTC  ·  Auto-refresh: 30 s  ·  Agent mode: {'LLM' if settings.llm_enabled else 'Stub'}")
+st.caption(
+    f"Showing {len(filtered)} of {total_articles} articles · "
+    f"Dashboard refreshed at {now_utc} UTC · Auto-refresh: 30s · "
+    f"Agent mode: {'LLM' if settings.llm_enabled else 'Stub'}"
+)

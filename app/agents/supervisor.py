@@ -2,8 +2,7 @@
 Supervisor Agent.
 
 Orchestrates the subagents using a LangGraph StateGraph.
-The supervisor defines the pipeline: research -> trend analysis -> QA,
-and returns the final consolidated result.
+Pipeline: Research (fetch+classify) -> Trend Analysis -> QA -> Result.
 """
 
 from typing import Any, TypedDict
@@ -19,10 +18,14 @@ from app.core.logger import logger
 class AgentState(TypedDict, total=False):
     """Shared state passed between agents in the graph."""
     topic: str
-    research_results: str
-    trend_results: str
+    queries: list[str]
+    fetch_limit: int
+    articles: list[dict]
+    article_count: int
+    trends: dict
     qa_passed: bool
     qa_notes: str
+    qa_issues: list[str]
 
 
 class SupervisorAgent:
@@ -40,10 +43,7 @@ class SupervisorAgent:
         self.graph = self._build_graph()
         logger.info("SupervisorAgent initialized")
 
-    # -- graph construction --------------------------------------------------
-
     def _build_graph(self) -> Any:
-        """Construct the LangGraph state graph."""
         graph = StateGraph(AgentState)
 
         graph.add_node("research", self._research_node)
@@ -57,8 +57,6 @@ class SupervisorAgent:
 
         return graph.compile()
 
-    # -- node wrappers --------------------------------------------------------
-
     def _research_node(self, state: AgentState) -> AgentState:
         return self.research.run(state)
 
@@ -67,8 +65,6 @@ class SupervisorAgent:
 
     def _qa_node(self, state: AgentState) -> AgentState:
         return self.qa.run(state)
-
-    # -- public API -----------------------------------------------------------
 
     def run(self, topic: str) -> AgentState:
         """Run the full agent pipeline for a given topic."""
