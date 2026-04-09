@@ -1,0 +1,19 @@
+[Unit]
+Description=AI Chief Agent - Streamlit Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+WorkingDirectory=/opt/ai-chief-agent
+ExecStart=/opt/ai-chief-agent/.venv/bin/streamlit run app/dashboard/app.py \
+    --server.address 0.0.0.0 \
+    --server.port 8501 \
+    --server.headless true
+Restart=always
+RestartSec=5
+Environment="PATH=/opt/ai-chief-agent/.venv/bin:/usr/bin:/bin"
+
+[Install]
+WantedBy=multi-user.target
