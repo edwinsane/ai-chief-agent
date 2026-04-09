@@ -8,8 +8,9 @@ Two-tab layout:
 
 import json
 import sys
+import time
 from collections import Counter
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -43,7 +44,6 @@ init_db()
 # ---------------------------------------------------------------------------
 st.markdown("""
 <style>
-meta[http-equiv="refresh"]{display:none}
 .block-container{padding-top:1.2rem}
 h1,h2,h3{letter-spacing:-0.02em}
 
@@ -97,7 +97,6 @@ h1,h2,h3{letter-spacing:-0.02em}
 
 [data-testid="stSidebar"]{background:#0E1117;border-right:1px solid #1E2330}
 </style>
-<meta http-equiv="refresh" content="30">
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
@@ -175,6 +174,72 @@ latest_briefing_row = get_latest_briefing()
 briefing_data = latest_briefing_row["data"] if latest_briefing_row else {}
 
 # ---------------------------------------------------------------------------
+# Sidebar — refresh controls (top) + filters
+# ---------------------------------------------------------------------------
+with st.sidebar:
+    st.markdown("### Refresh")
+    _refresh_col1, _refresh_col2 = st.columns([1, 1])
+    with _refresh_col1:
+        if st.button("Refresh Now", use_container_width=True, type="primary"):
+            st.rerun()
+    with _refresh_col2:
+        auto_refresh_on = st.toggle("Auto", value=False, key="_auto_refresh_toggle")
+
+    INTERVAL_OPTIONS = {"Manual only": 0, "1 minute": 60, "5 minutes": 300, "15 minutes": 900}
+    if auto_refresh_on:
+        interval_label = st.selectbox(
+            "Interval",
+            options=list(INTERVAL_OPTIONS.keys())[1:],  # exclude "Manual only"
+            index=0,
+            key="_refresh_interval",
+        )
+        refresh_seconds = INTERVAL_OPTIONS[interval_label]
+    else:
+        interval_label = "Manual only"
+        refresh_seconds = 0
+
+    # Show last refresh timestamp
+    now_for_display = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+    st.caption(f"Last loaded: {now_for_display}")
+
+    st.markdown("---")
+    st.markdown("### Filters")
+    f_categories = st.multiselect("Category", options=db_categories, default=[], placeholder="All categories")
+    f_regions = st.multiselect("Region", options=db_regions, default=[], placeholder="All regions")
+    f_sources = st.multiselect("Source", options=db_sources, default=[], placeholder="All sources")
+    f_urgency = st.multiselect("Urgency", options=["breaking","high","medium","low"], default=[], placeholder="All levels")
+    f_relevance = st.slider("Min relevance", 0.0, 1.0, 0.0, 0.05)
+    dates = [_parse_date(a.get("published_at","")) for a in all_articles]
+    valid_dates = [d for d in dates if d]
+    if valid_dates:
+        f_date_range = st.date_input("Date range", value=(min(valid_dates),max(valid_dates)),
+                                     min_value=min(valid_dates), max_value=max(valid_dates))
+    else:
+        f_date_range = None
+    f_keyword = st.text_input("Keyword search", placeholder="Search titles & summaries...")
+    st.markdown("---")
+    mode_label = "LLM" if settings.llm_enabled else "Rules"
+    news_label = "NewsAPI + RSS" if settings.newsapi_enabled else "RSS only"
+    st.caption(f"Agent mode: **{mode_label}** · Providers: **{news_label}**")
+
+# ---------------------------------------------------------------------------
+# Auto-refresh via fragment (only when enabled)
+# Uses st.fragment(run_every=...) to schedule a soft rerun that preserves
+# all widget state (tabs, filters, scroll) — unlike the old <meta> tag.
+# ---------------------------------------------------------------------------
+if refresh_seconds > 0:
+    @st.fragment(run_every=timedelta(seconds=refresh_seconds))
+    def _auto_refresher():
+        if "_arf_ts" not in st.session_state:
+            st.session_state._arf_ts = time.time()
+            return
+        elapsed = time.time() - st.session_state._arf_ts
+        if elapsed >= refresh_seconds * 0.8:
+            st.session_state._arf_ts = time.time()
+            st.rerun(scope="app")
+    _auto_refresher()
+
+# ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
 st.markdown("## AI Chief Agent")
@@ -187,27 +252,6 @@ tab_feed, tab_macro = st.tabs(["Intelligence Feed", "Macro Intelligence"])
 
 # ============================= TAB 1: FEED ================================
 with tab_feed:
-
-    # Sidebar filters
-    with st.sidebar:
-        st.markdown("### Filters")
-        f_categories = st.multiselect("Category", options=db_categories, default=[], placeholder="All categories")
-        f_regions = st.multiselect("Region", options=db_regions, default=[], placeholder="All regions")
-        f_sources = st.multiselect("Source", options=db_sources, default=[], placeholder="All sources")
-        f_urgency = st.multiselect("Urgency", options=["breaking","high","medium","low"], default=[], placeholder="All levels")
-        f_relevance = st.slider("Min relevance", 0.0, 1.0, 0.0, 0.05)
-        dates = [_parse_date(a.get("published_at","")) for a in all_articles]
-        valid_dates = [d for d in dates if d]
-        if valid_dates:
-            f_date_range = st.date_input("Date range", value=(min(valid_dates),max(valid_dates)),
-                                         min_value=min(valid_dates), max_value=max(valid_dates))
-        else:
-            f_date_range = None
-        f_keyword = st.text_input("Keyword search", placeholder="Search titles & summaries...")
-        st.markdown("---")
-        mode_label = "LLM" if settings.llm_enabled else "Rules"
-        news_label = "NewsAPI + RSS" if settings.newsapi_enabled else "RSS only"
-        st.caption(f"Agent mode: **{mode_label}** · Providers: **{news_label}**")
 
     # Apply filters
     filtered = all_articles
@@ -395,8 +439,9 @@ with tab_macro:
 # ---------------------------------------------------------------------------
 st.markdown('<hr class="sd">', unsafe_allow_html=True)
 now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+refresh_status = f"Auto: {interval_label}" if refresh_seconds > 0 else "Manual"
 st.caption(
     f"Showing {len(all_articles)} articles · "
-    f"Refreshed {now_utc} UTC · Auto-refresh: 30s · "
+    f"Loaded {now_utc} UTC · Refresh: {refresh_status} · "
     f"Mode: {'LLM' if settings.llm_enabled else 'Rules'}"
 )
