@@ -64,6 +64,20 @@ def init_db() -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS briefings (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id           INTEGER NOT NULL,
+            top_theme        TEXT,
+            overall_risk     TEXT,
+            overall_confidence REAL,
+            data             TEXT    NOT NULL,
+            created_at       TEXT    NOT NULL,
+            FOREIGN KEY (run_id) REFERENCES runs(id)
+        )
+        """
+    )
     conn.commit()
     conn.close()
     logger.info("Database initialized at %s", _DB_PATH)
@@ -233,3 +247,63 @@ def get_distinct_regions() -> list[str]:
     ).fetchall()
     conn.close()
     return [row["region"] for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Briefings
+# ---------------------------------------------------------------------------
+
+def save_briefing(run_id: int, briefing: dict) -> int:
+    """Save a macro intelligence briefing linked to a run."""
+    conn = _get_connection()
+    now = datetime.now(timezone.utc).isoformat()
+    cursor = conn.execute(
+        """
+        INSERT INTO briefings (run_id, top_theme, overall_risk, overall_confidence, data, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            run_id,
+            briefing.get("top_theme", ""),
+            briefing.get("overall_risk_level", "low"),
+            briefing.get("overall_confidence", 0.0),
+            json.dumps(briefing, default=str),
+            now,
+        ),
+    )
+    conn.commit()
+    row_id = cursor.lastrowid
+    conn.close()
+    logger.info("Saved briefing #%d for run #%d (theme: %s)", row_id, run_id, briefing.get("top_theme"))
+    return row_id
+
+
+def get_latest_briefing() -> dict | None:
+    """Return the most recent briefing with parsed data."""
+    conn = _get_connection()
+    row = conn.execute("SELECT * FROM briefings ORDER BY id DESC LIMIT 1").fetchone()
+    conn.close()
+    if not row:
+        return None
+    d = dict(row)
+    try:
+        d["data"] = json.loads(d["data"]) if d["data"] else {}
+    except (json.JSONDecodeError, TypeError):
+        d["data"] = {}
+    return d
+
+
+def get_briefings(limit: int = 20) -> list[dict]:
+    """Return recent briefings."""
+    conn = _get_connection()
+    rows = conn.execute("SELECT * FROM briefings ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    conn.close()
+    results = []
+    for row in rows:
+        d = dict(row)
+        try:
+            d["data"] = json.loads(d["data"]) if d["data"] else {}
+        except (json.JSONDecodeError, TypeError):
+            d["data"] = {}
+        results.append(d)
+    return results

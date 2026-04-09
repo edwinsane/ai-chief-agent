@@ -2,13 +2,14 @@
 Supervisor Agent.
 
 Orchestrates the subagents using a LangGraph StateGraph.
-Pipeline: Research (fetch+classify) -> Trend Analysis -> QA -> Result.
+Pipeline: Research -> Trend Analysis -> QA -> Macro Intel -> Result.
 """
 
 from typing import Any, TypedDict
 
 from langgraph.graph import END, StateGraph
 
+from app.agents.macro_intel_agent import MacroIntelAgent
 from app.agents.qa_agent import QAAgent
 from app.agents.research_agent import ResearchAgent
 from app.agents.trend_agent import TrendAgent
@@ -26,6 +27,7 @@ class AgentState(TypedDict, total=False):
     qa_passed: bool
     qa_notes: str
     qa_issues: list[str]
+    macro_briefing: dict
 
 
 class SupervisorAgent:
@@ -33,13 +35,14 @@ class SupervisorAgent:
     Top-level orchestrator.
 
     Builds a LangGraph pipeline that routes work through
-    ResearchAgent -> TrendAgent -> QAAgent sequentially.
+    ResearchAgent -> TrendAgent -> QAAgent -> MacroIntelAgent sequentially.
     """
 
     def __init__(self) -> None:
         self.research = ResearchAgent()
         self.trend = TrendAgent()
         self.qa = QAAgent()
+        self.macro_intel = MacroIntelAgent()
         self.graph = self._build_graph()
         logger.info("SupervisorAgent initialized")
 
@@ -49,11 +52,13 @@ class SupervisorAgent:
         graph.add_node("research", self._research_node)
         graph.add_node("trend_analysis", self._trend_node)
         graph.add_node("qa", self._qa_node)
+        graph.add_node("macro_intel", self._macro_intel_node)
 
         graph.set_entry_point("research")
         graph.add_edge("research", "trend_analysis")
         graph.add_edge("trend_analysis", "qa")
-        graph.add_edge("qa", END)
+        graph.add_edge("qa", "macro_intel")
+        graph.add_edge("macro_intel", END)
 
         return graph.compile()
 
@@ -65,6 +70,9 @@ class SupervisorAgent:
 
     def _qa_node(self, state: AgentState) -> AgentState:
         return self.qa.run(state)
+
+    def _macro_intel_node(self, state: AgentState) -> AgentState:
+        return self.macro_intel.run(state)
 
     def run(self, topic: str) -> AgentState:
         """Run the full agent pipeline for a given topic."""
