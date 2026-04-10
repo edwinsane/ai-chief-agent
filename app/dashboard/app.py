@@ -170,6 +170,30 @@ html,body,[data-testid="stAppViewContainer"]{background:#060A12!important}
 .sh h2{margin:0!important;padding:0!important;font-size:.9rem!important;font-weight:700!important;color:#D0D8E4!important;letter-spacing:-.01em!important}
 .sh .su{font-size:.58rem;color:#1A3050;text-transform:uppercase;letter-spacing:.08em;margin-top:.1rem}
 
+/* map status bar */
+.msb{display:flex;flex-wrap:wrap;gap:.4rem;padding:.5rem .7rem;background:#070C16;border:1px solid #0F1A2E;border-radius:8px;margin-bottom:.8rem}
+.msi{display:flex;align-items:center;gap:.3rem;padding:.18rem .5rem;font-size:.58rem;font-weight:600;color:#4A6A8A;letter-spacing:.03em}
+.msi .mv{font-weight:800}.msi .mv.hi{color:#00E676}.msi .mv.el{color:#FFB800}.msi .mv.cr{color:#FF5252}.msi .mv.nf{color:#00D4FF}
+.msi::after{content:"·";margin-left:.3rem;color:#0F1A2E}
+.msi:last-child::after{content:""}
+
+/* event intel panel */
+.eip{background:#0A1020;border:1px solid #0F1A2E;border-radius:10px;padding:1rem 1.2rem;margin-bottom:.6rem}
+.eip .el{font-size:.55rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#00D4FF;margin-bottom:.4rem}
+.eip h4{margin:0 0 .35rem;color:#D0D8E4;font-size:.9rem;font-weight:700;line-height:1.3}
+.eip .er{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.35rem}
+.eip .ev{font-size:.68rem;color:#4A6A8A;line-height:1.4}
+.eip .ev strong{color:#6B9CC0}
+.eip .ew{color:#FFB800;font-size:.72rem;font-style:italic;padding:.3rem 0 .3rem .6rem;border-left:2px solid rgba(255,184,0,.2);margin-top:.3rem}
+
+/* hotspot card */
+.hs{background:#0A1020;border:1px solid #0F1A2E;border-radius:8px;padding:.7rem .8rem;text-align:center;transition:border-color .2s}
+.hs:hover{border-color:#1A3050}
+.hs .hr{font-size:.8rem;font-weight:800;color:#D0D8E4;margin-bottom:.15rem}
+.hs .hc{font-size:1.3rem;font-weight:800}
+.hs .hc.cr{color:#FF5252}.hs .hc.el{color:#FFB800}.hs .hc.hi{color:#00E676}.hs .hc.nf{color:#00D4FF}
+.hs .hl{font-size:.55rem;color:#1A3050;text-transform:uppercase;letter-spacing:.06em;margin-top:.15rem}
+
 .ftr{text-align:center;color:#1A3050;font-size:.58rem;letter-spacing:.06em;padding:.6rem 0;text-transform:uppercase}
 </style>""", unsafe_allow_html=True)
 
@@ -309,9 +333,9 @@ ml2=outlook["market_reaction"]["level"][:8];mc2="cr" if "OFF" in ml2 else "el" i
 st.markdown('<div class="sig">'+_pill("AI PULSE",av,al)+_pill("GEO RISK",gv,gl)+_pill("ESCALATION",outlook["escalation_risk"]["level"],ec)+_pill("MARKETS",outlook["market_reaction"]["level"],mc2)+_pill("BREAKING",str(_brk),bl)+_pill("SWEEP",ags,"cr" if fresh["is_stale"] else "nf")+_pill("ARTICLES",str(fresh["last_sweep_article_count"]),"nf")+'</div>',unsafe_allow_html=True)
 
 # ═══════════════════════ TABS ════════════════════════════════════════════
-t1,t2,t3=st.tabs(["INTELLIGENCE FEED","WORLD INTEL MAP","MACRO INTELLIGENCE"])
+t_map,t_feed,t_macro=st.tabs(["WORLD INTEL","INTELLIGENCE FEED","MACRO INTELLIGENCE"])
 
-# filter
+# ── apply filters ──
 flt=all_articles
 if fc: flt=[a for a in flt if a.get("category") in fc]
 if fr: flt=[a for a in flt if a.get("region") in fr]
@@ -323,32 +347,163 @@ if fdr and isinstance(fdr,tuple) and len(fdr)==2:
 if fk: kw=fk.lower();flt=[a for a in flt if kw in (a.get("title","")+a.get("short_summary","")).lower()]
 flt.sort(key=lambda a:a.get("relevance_score",0),reverse=True)
 
-# ══════════════════════ TAB 1: FEED ══════════════════════════════════════
-with t1:
-    # KPIs
+# ── precompute map data ──
+cat_colors={"AI":"#00D4FF","AI Coding":"#4ECDC4","AI Trading":"#45B7D1","Geopolitics":"#FFB800","Military / Security":"#FF5252","Markets":"#BB86FC","Crypto":"#96CEB4","Energy":"#FFEAA7","Shipping / Supply Chain":"#FF6B6B","Natural Disasters":"#E17055","Global News":"#4A6A8A","Breaking News":"#FF5252","Sanctions":"#fd79a8","Infrastructure":"#a29bfe"}
+_rc=Counter(a.get("region","Global") for a in flt)
+_uc=Counter(a.get("urgency","low") for a in flt)
+_conflict=[a for a in flt if a.get("category") in ("Military / Security","Geopolitics")]
+_mkt_sens=[a for a in flt if a.get("market_impact")=="high"]
+
+
+# ══════════════════ TAB 1: WORLD INTEL (landing) ═════════════════════════
+with t_map:
+    if not flt:
+        st.info("No articles to display. Run `python main.py` to collect intelligence.")
+    else:
+        # ── Map status bar ──
+        o=outlook
+        _el=o["escalation_risk"]["level"];_elc="cr" if _el in("HIGH",) else "el" if _el in ("ELEVATED",) else "lo"
+        _ml=o["market_reaction"]["level"];_mlc="cr" if "OFF" in _ml else "el" if "VOL" in _ml else "hi" if "ON" in _ml else "lo"
+        st.markdown(
+            '<div class="msb">'
+            +f'<div class="msi">INCIDENTS <span class="mv nf">{len(flt)}</span></div>'
+            +f'<div class="msi">CONFLICTS <span class="mv {"cr" if len(_conflict)>=3 else "el" if len(_conflict)>=1 else "lo"}">{len(_conflict)}</span></div>'
+            +f'<div class="msi">AI EVENTS <span class="mv nf">{_ai}</span></div>'
+            +f'<div class="msi">MARKET-SENSITIVE <span class="mv {"cr" if len(_mkt_sens)>=3 else "el" if len(_mkt_sens)>=1 else "lo"}">{len(_mkt_sens)}</span></div>'
+            +f'<div class="msi">BREAKING <span class="mv {"cr" if _brk>=1 else "lo"}">{_brk}</span></div>'
+            +f'<div class="msi">ESCALATION <span class="mv {_elc}">{_el}</span></div>'
+            +f'<div class="msi">MARKETS <span class="mv {_mlc}">{_ml}</span></div>'
+            +f'<div class="msi">REGIONS <span class="mv nf">{len(_rc)}</span></div>'
+            +f'<div class="msi">SOURCES <span class="mv nf">{len(db_src)}</span></div>'
+            +'</div>',
+            unsafe_allow_html=True,
+        )
+
+        # ── Full-width globe map ──
+        map_data=[]
+        for a in flt:
+            lat,lon=infer_coordinates(a)
+            urg=a.get("urgency","low")
+            sz={"breaking":18,"high":12,"medium":8,"low":5}.get(urg,5)
+            map_data.append({
+                "lat":lat,"lon":lon,"title":a["title"][:90],
+                "category":a.get("category",""),"urgency":urg,
+                "region":a.get("region",""),"relevance":a.get("relevance_score",0),
+                "size":sz,"source":a.get("source",""),
+                "market_impact":a.get("market_impact","low"),
+            })
+        mdf=pd.DataFrame(map_data)
+
+        fig_map=px.scatter_geo(
+            mdf,lat="lat",lon="lon",color="category",size="size",
+            hover_name="title",
+            hover_data={"urgency":True,"region":True,"relevance":":.0%","market_impact":True,"source":True,"lat":False,"lon":False,"size":False},
+            color_discrete_map=cat_colors,size_max=20,
+        )
+        fig_map.update_geos(
+            bgcolor="rgba(0,0,0,0)",
+            landcolor="#0A1525",oceancolor="#050A14",lakecolor="#050A14",
+            coastlinecolor="#1A3050",countrycolor="#0F1A2E",
+            showframe=False,showcoastlines=True,showland=True,showocean=True,
+            showcountries=True,showlakes=True,
+            projection_type="natural earth",
+        )
+        fig_map.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#6B9CC0",size=10),
+            margin=dict(l=0,r=0,t=5,b=5),height=560,
+            legend=dict(
+                bgcolor="rgba(6,10,18,0.85)",bordercolor="#0F1A2E",borderwidth=1,
+                font=dict(size=9,color="#6B9CC0"),
+                orientation="h",yanchor="bottom",y=1.02,xanchor="center",x=0.5,
+            ),
+        )
+        fig_map.update_traces(marker=dict(line=dict(width=0.5,color="#0A1525"),opacity=0.85))
+        st.plotly_chart(fig_map,use_container_width=True)
+
+        # ── Global Risk Overview (predictions) ──
+        st.markdown('<hr class="sd">',unsafe_allow_html=True)
+        st.markdown(_sh("Global Risk Overview","Next 6H / 24H predictive outlook"),unsafe_allow_html=True)
+        p1,p2,p3,p4,p5=st.columns(5)
+        with p1: st.markdown(_pd("Escalation Risk",o["escalation_risk"]["level"],o["escalation_risk"]["detail"],o["escalation_risk"]["score"]),unsafe_allow_html=True)
+        with p2: st.markdown(_pd("Market Reaction",o["market_reaction"]["level"],o["market_reaction"]["detail"],o["market_reaction"]["score"]),unsafe_allow_html=True)
+        with p3: st.markdown(_pd("AI Momentum",o["ai_momentum"]["level"],o["ai_momentum"]["detail"],o["ai_momentum"]["score"]),unsafe_allow_html=True)
+        with p4: st.markdown(_pd("Supply Chain",o["supply_chain_risk"]["level"],o["supply_chain_risk"]["detail"],o["supply_chain_risk"]["score"]),unsafe_allow_html=True)
+        with p5: st.markdown(_pd("Energy Sens.",o["energy_sensitivity"]["level"],o["energy_sensitivity"]["detail"],o["energy_sensitivity"]["score"]),unsafe_allow_html=True)
+        wl=o.get("watchlist",[])
+        if wl:
+            with st.expander(f"Watchlist ({len(wl)} items) · Confidence: {o['overall_confidence']:.0%}"):
+                for w in wl: st.markdown(f"- {w}")
+
+        # ── Regional Hotspots ──
+        st.markdown('<hr class="sd">',unsafe_allow_html=True)
+        st.markdown(_sh("Regional Hotspots","Event concentration by region"),unsafe_allow_html=True)
+        top_regions=_rc.most_common(7)
+        rcols=st.columns(len(top_regions))
+        for i,(reg,cnt) in enumerate(top_regions):
+            clr="cr" if cnt>=5 else "el" if cnt>=3 else "hi" if cnt>=2 else "nf"
+            with rcols[i]:
+                st.markdown(f'<div class="hs"><div class="hr">{reg}</div><div class="hc {clr}">{cnt}</div><div class="hl">events</div></div>',unsafe_allow_html=True)
+
+        # ── Event Detail (select article) ──
+        st.markdown('<hr class="sd">',unsafe_allow_html=True)
+        st.markdown(_sh("Event Intelligence","Select an event for detailed analysis"),unsafe_allow_html=True)
+        titles=["Select an event..."]+[f"[{a.get('category','')}] {a['title'][:80]}" for a in flt]
+        sel=st.selectbox("Event",titles,index=0,key="map_event_sel",label_visibility="collapsed")
+        if sel!="Select an event..." and (idx:=titles.index(sel)-1)>=0 and idx<len(flt):
+            ea=flt[idx]
+            uc=_uchip(ea.get("urgency","low"))
+            mi=ea.get("market_impact","low");mic={"high":"cr","medium":"el","low":"lo"}.get(mi,"lo")
+            geo_sig=ea.get("confidence_score",0)
+            tags=ea.get("tags",[]);cat=ea.get("category","");reg=ea.get("region","")
+            ch=f'<span class="c cc">{cat}</span>' if cat else ""
+            ch+=f'<span class="c ct">{reg}</span>' if reg and reg!="Global" else ""
+            ch+="".join(f'<span class="c ct">{t}</span>' for t in tags[:4])
+            wim=ea.get("why_it_matters","")
+            wh=f'<div class="ew">Why it matters: {wim}</div>' if wim else ""
+            st.markdown(
+                f'<div class="eip">'
+                f'<div class="el">EVENT INTELLIGENCE</div>'
+                f'<h4>{ea["title"]}</h4>'
+                f'<div class="er">{uc} '
+                f'<span class="c chi">MARKET: {mi.upper()}</span> '
+                f'<span class="c cm">CONFIDENCE: {geo_sig:.0%}</span> '
+                f'<span class="c ct">REL: {ea.get("relevance_score",0):.0%}</span></div>'
+                f'<div class="ev"><strong>Source:</strong> {ea.get("source","")}</div>'
+                f'<div class="ev"><strong>Published:</strong> {ea.get("published_at","")[:16].replace("T"," ")} ({_time_ago(ea.get("published_at",""))})</div>'
+                f'<div class="ev"><strong>Region:</strong> {reg}</div>'
+                f'<div class="ev"><strong>Summary:</strong> {ea.get("short_summary","")}</div>'
+                f'{wh}'
+                f'<div class="ch" style="margin-top:.4rem">{ch}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+        # ── Category & Urgency breakdown ──
+        st.markdown('<hr class="sd">',unsafe_allow_html=True)
+        st.markdown(_sh("Event Distribution","Category and urgency breakdown"),unsafe_allow_html=True)
+        mc1,mc2=st.columns(2)
+        with mc1:
+            cc2=Counter(a.get("category","?") for a in flt)
+            df=pd.DataFrame(cc2.most_common(12),columns=["Category","Count"])
+            fig=px.bar(df,x="Count",y="Category",orientation="h",title="Events by Category",color="Category",color_discrete_map=cat_colors)
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(_plotly_dark(fig),use_container_width=True)
+        with mc2:
+            df_u=pd.DataFrame(list(_uc.items()),columns=["Urgency","Count"])
+            u_colors={"breaking":"#FF5252","high":"#FFB800","medium":"#00D4FF","low":"#1A3050"}
+            fig_u=px.pie(df_u,values="Count",names="Urgency",title="Urgency Distribution",color="Urgency",color_discrete_map=u_colors,hole=.45)
+            st.plotly_chart(_plotly_dark(fig_u),use_container_width=True)
+
+
+# ══════════════════════ TAB 2: FEED ══════════════════════════════════════
+with t_feed:
     k1,k2,k3,k4,k5=st.columns(5)
     with k1: st.markdown(_kpi("Articles",total_articles,"b"),unsafe_allow_html=True)
     with k2: st.markdown(_kpi("Runs",total_runs,"p"),unsafe_allow_html=True)
     with k3: st.markdown(_kpi("QA Pass",qa["passed"],"g"),unsafe_allow_html=True)
     with k4: st.markdown(_kpi("QA Fail",qa["failed"],"r"),unsafe_allow_html=True)
     with k5: st.markdown(_kpi("Showing",f'{len(flt)}/{total_articles}',"a"),unsafe_allow_html=True)
-
-    # Predictive outlook
-    st.markdown('<hr class="sd">',unsafe_allow_html=True)
-    st.markdown(_sh("Next 6H / 24H Outlook","Predictive intelligence from current signals"),unsafe_allow_html=True)
-    o=outlook
-    p1,p2,p3,p4,p5=st.columns(5)
-    with p1: st.markdown(_pd("Escalation Risk",o["escalation_risk"]["level"],o["escalation_risk"]["detail"],o["escalation_risk"]["score"]),unsafe_allow_html=True)
-    with p2: st.markdown(_pd("Market Reaction",o["market_reaction"]["level"],o["market_reaction"]["detail"],o["market_reaction"]["score"]),unsafe_allow_html=True)
-    with p3: st.markdown(_pd("AI Momentum",o["ai_momentum"]["level"],o["ai_momentum"]["detail"],o["ai_momentum"]["score"]),unsafe_allow_html=True)
-    with p4: st.markdown(_pd("Supply Chain",o["supply_chain_risk"]["level"],o["supply_chain_risk"]["detail"],o["supply_chain_risk"]["score"]),unsafe_allow_html=True)
-    with p5: st.markdown(_pd("Energy Sens.",o["energy_sensitivity"]["level"],o["energy_sensitivity"]["detail"],o["energy_sensitivity"]["score"]),unsafe_allow_html=True)
-
-    # Watchlist
-    wl=o.get("watchlist",[])
-    if wl:
-        with st.expander(f"Watchlist ({len(wl)} items) · Confidence: {o['overall_confidence']:.0%}"):
-            for w in wl: st.markdown(f"- {w}")
 
     # Hero + actionable panels
     st.markdown('<hr class="sd">',unsafe_allow_html=True)
@@ -380,63 +535,26 @@ with t1:
         items=[a for a in flt if a.get("category")==cat] if cat!="Breaking News" else [a for a in flt if a.get("urgency")=="breaking"]
         _rs(cat,items)
 
-    # Plotly charts
+    # Analytics
     st.markdown('<hr class="sd">',unsafe_allow_html=True)
-    st.markdown(_sh("Analytics","Distribution & trends"),unsafe_allow_html=True)
+    st.markdown(_sh("Analytics","Topic & region analysis"),unsafe_allow_html=True)
     if flt:
         c1,c2=st.columns(2)
         with c1:
-            cc2=Counter(a.get("category","?") for a in flt)
-            df=pd.DataFrame(cc2.most_common(12),columns=["Category","Count"])
-            fig=px.bar(df,x="Count",y="Category",orientation="h",title="Category Distribution")
-            st.plotly_chart(_plotly_dark(fig),use_container_width=True)
-        with c2:
             tc=Counter(t for a in flt for t in a.get("tags",[]))
             if tc:
                 df2=pd.DataFrame(tc.most_common(12),columns=["Topic","Count"])
                 fig2=px.bar(df2,x="Count",y="Topic",orientation="h",title="Topic Frequency")
                 st.plotly_chart(_plotly_dark(fig2),use_container_width=True)
-        c3,c4=st.columns(2)
-        with c3:
-            uc=Counter(a.get("urgency","low") for a in flt)
-            df3=pd.DataFrame(list(uc.items()),columns=["Urgency","Count"])
-            colors={"breaking":"#FF5252","high":"#FFB800","medium":"#00D4FF","low":"#1A3050"}
-            fig3=px.pie(df3,values="Count",names="Urgency",title="Urgency Distribution",color="Urgency",color_discrete_map=colors,hole=.4)
-            st.plotly_chart(_plotly_dark(fig3),use_container_width=True)
-        with c4:
+        with c2:
             rc=Counter(a.get("region","Global") for a in flt)
             df4=pd.DataFrame(rc.most_common(8),columns=["Region","Count"])
             fig4=px.bar(df4,x="Count",y="Region",orientation="h",title="Region Impact")
             st.plotly_chart(_plotly_dark(fig4),use_container_width=True)
 
-# ══════════════════════ TAB 2: WORLD MAP ═════════════════════════════════
-with t2:
-    st.markdown(_sh("World Intelligence Map","Global event distribution"),unsafe_allow_html=True)
-    if flt:
-        map_data=[]
-        for a in flt:
-            lat,lon=infer_coordinates(a)
-            urg=a.get("urgency","low")
-            sz={"breaking":14,"high":10,"medium":7,"low":5}.get(urg,5)
-            map_data.append({"lat":lat,"lon":lon,"title":a["title"][:80],"category":a.get("category",""),"urgency":urg,"region":a.get("region",""),"relevance":a.get("relevance_score",0),"size":sz,"source":a.get("source","")})
-        mdf=pd.DataFrame(map_data)
-        cat_colors={"AI":"#00D4FF","AI Coding":"#4ECDC4","AI Trading":"#45B7D1","Geopolitics":"#FFB800","Military / Security":"#FF5252","Markets":"#BB86FC","Crypto":"#96CEB4","Energy":"#FFEAA7","Shipping / Supply Chain":"#FF6B6B","Natural Disasters":"#E17055","Global News":"#636e72","Breaking News":"#FF5252","Sanctions":"#fd79a8","Infrastructure":"#a29bfe"}
-        fig_map=px.scatter_geo(mdf,lat="lat",lon="lon",color="category",size="size",hover_name="title",hover_data={"urgency":True,"region":True,"relevance":":.0%","lat":False,"lon":False,"size":False},title="",color_discrete_map=cat_colors,size_max=16)
-        fig_map.update_geos(bgcolor="rgba(0,0,0,0)",landcolor="#0A1525",oceancolor="#060A12",lakecolor="#060A12",coastlinecolor="#1A3050",countrycolor="#0F1A2E",showframe=False,projection_type="natural earth")
-        fig_map.update_layout(paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",font=dict(color="#6B9CC0",size=10),margin=dict(l=0,r=0,t=10,b=0),height=500,legend=dict(bgcolor="rgba(0,0,0,0)",font=dict(size=9)))
-        st.plotly_chart(fig_map,use_container_width=True)
-
-        # Region breakdown
-        st.markdown('<hr class="sd">',unsafe_allow_html=True)
-        st.markdown(_sh("Regional Breakdown","Event concentration by region"),unsafe_allow_html=True)
-        rc2=Counter(a.get("region","Global") for a in flt)
-        rcols=st.columns(min(len(rc2),7))
-        for i,(reg,cnt) in enumerate(rc2.most_common(7)):
-            with rcols[i]: st.markdown(_kpi(reg,cnt,"b"),unsafe_allow_html=True)
-    else: st.info("No articles to map.")
 
 # ══════════════════════ TAB 3: MACRO INTEL ═══════════════════════════════
-with t3:
+with t_macro:
     if not bdata:
         st.info("No macro briefing. Run `python main.py`.")
     else:
