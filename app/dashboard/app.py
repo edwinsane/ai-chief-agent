@@ -1,793 +1,507 @@
 """
-AI Chief Agent — Executive Intelligence Terminal.
+AI Chief Agent — Global Intelligence Command Center.
 
-Premium two-tab dashboard:
-  1. Intelligence Feed — hero story, signal strip, articles, trends
-  2. Macro Intelligence — institutional briefing, scenarios, asset views
+Three-tab premium dashboard:
+  1. Intelligence Feed — hero, actionable panels, articles, Plotly charts
+  2. World Intel Map — Plotly globe with event markers
+  3. Macro Intelligence — briefing, scenarios, assets, predictions
 """
 
-import json
-import sys
-import time
+import json, sys, time
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.core.config import settings  # noqa: E402
+from app.core.geo_coords import infer_coordinates  # noqa: E402
+from app.core.predictions import generate_outlook  # noqa: E402
 from app.storage.database import (  # noqa: E402
-    get_article_count,
-    get_articles,
-    get_briefings,
-    get_distinct_categories,
-    get_distinct_regions,
-    get_distinct_sources,
-    get_freshness_info,
-    get_last_run,
-    get_latest_briefing,
-    get_qa_stats,
-    get_run_count,
-    init_db,
+    get_article_count, get_articles, get_briefings,
+    get_distinct_categories, get_distinct_regions, get_distinct_sources,
+    get_freshness_info, get_last_run, get_latest_briefing,
+    get_qa_stats, get_run_count, init_db,
 )
 
-# ╔═════════════════════════════════════════════════════════════════════════╗
-# ║  PAGE SETUP                                                           ║
-# ╚═════════════════════════════════════════════════════════════════════════╝
+# ═══════════════════════ SETUP ═══════════════════════════════════════════
 st.set_page_config(page_title="AI Chief Agent", page_icon="🤖", layout="wide")
 init_db()
 
-# ╔═════════════════════════════════════════════════════════════════════════╗
-# ║  DESIGN SYSTEM — CSS                                                  ║
-# ║  Palette: navy #0A0E1A · blue #00D4FF · gold #FFB800                  ║
-# ║  Bullish #00E676 · Bearish #FF5252 · Purple #BB86FC                   ║
-# ╚═════════════════════════════════════════════════════════════════════════╝
-st.markdown("""
-<style>
-/* ── Reset & globals ──────────────────────────────────────────────────── */
-.block-container{padding-top:.8rem;max-width:1440px}
-html,body,[data-testid="stAppViewContainer"]{background:#0A0E1A!important}
+# Plotly dark template
+_PLT = dict(
+    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(color="#6B9CC0", size=11),
+    margin=dict(l=0, r=0, t=30, b=0),
+    colorway=["#00D4FF", "#FFB800", "#00E676", "#FF5252", "#BB86FC",
+              "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7"],
+)
+
+# ═══════════════════════ CSS ═════════════════════════════════════════════
+st.markdown("""<style>
+.block-container{padding-top:.6rem;max-width:1480px}
+html,body,[data-testid="stAppViewContainer"]{background:#060A12!important}
 [data-testid="stHeader"]{background:transparent!important}
-[data-testid="stBottomBlockContainer"]{background:#0A0E1A!important}
-
-/* ── Typography scale ─────────────────────────────────────────────────── */
-h1{font-size:1.1rem!important;color:#E8ECF1!important;font-weight:700!important}
-h2{font-size:1rem!important;color:#E8ECF1!important;font-weight:700!important}
-h3{font-size:.95rem!important;color:#D0D8E4!important;font-weight:600!important}
-
-/* ── Sidebar ──────────────────────────────────────────────────────────── */
-[data-testid="stSidebar"]{background:linear-gradient(180deg,#060A14 0%,#0A0E1A 100%)!important;border-right:1px solid #122040}
-[data-testid="stSidebar"] hr{border-color:#122040!important;margin:.8rem 0!important}
-.sb-hdr{font-size:.65rem;text-transform:uppercase;letter-spacing:.1em;color:#3D5A80;font-weight:700;margin:1rem 0 .4rem 0}
-
-/* ── Tabs ─────────────────────────────────────────────────────────────── */
-[data-testid="stTabs"]{background:#0A0E1A}
-[data-testid="stTabs"] button{
-  font-size:.8rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
-  padding:.65rem 1.6rem;color:#3D5A80;
-  border:1px solid transparent;border-bottom:2px solid transparent;border-radius:0;
-  transition:all .2s ease;
-}
-[data-testid="stTabs"] button[aria-selected="true"]{
-  color:#00D4FF;border-bottom:2px solid #00D4FF;
-  background:linear-gradient(180deg,rgba(0,212,255,.04) 0%,transparent 100%);
-}
-[data-testid="stTabs"] button:hover:not([aria-selected="true"]){color:#6B9CC0}
-[data-testid="stTabs"] [role="tablist"]{border-bottom:1px solid #122040;gap:0}
-
-/* ── Dividers ─────────────────────────────────────────────────────────── */
-.sd{border:none;height:1px;background:linear-gradient(90deg,transparent 0%,#122040 20%,#1E3A5F 50%,#122040 80%,transparent 100%);margin:2.2rem 0}
-.sd-sm{border:none;height:1px;background:#122040;margin:1.2rem 0}
-
-/* ── Section header ───────────────────────────────────────────────────── */
-.sh{margin:0 0 1.2rem 0;padding-bottom:.6rem;border-bottom:1px solid #122040}
-.sh h2{margin:0!important;padding:0!important;font-size:1rem!important;font-weight:700!important;color:#E8ECF1!important;letter-spacing:-.01em!important}
-.sh .sub{font-size:.68rem;color:#3D5A80;text-transform:uppercase;letter-spacing:.08em;margin-top:.15rem}
-
-/* ── Command header ───────────────────────────────────────────────────── */
-.cmd-hdr{display:flex;align-items:baseline;justify-content:space-between;padding:.6rem 0 .8rem 0;border-bottom:1px solid #122040;margin-bottom:1rem}
-.cmd-hdr .title{font-size:1.4rem;font-weight:800;color:#E8ECF1;letter-spacing:-.02em}
-.cmd-hdr .title span{color:#00D4FF}
-.cmd-hdr .meta{font-size:.65rem;color:#3D5A80;letter-spacing:.06em;text-transform:uppercase}
-
-/* ── Signal strip ─────────────────────────────────────────────────────── */
-.sig-strip{
-  display:flex;flex-wrap:wrap;gap:.5rem;
-  padding:.75rem 1rem;margin:1rem 0 1.5rem 0;
-  background:linear-gradient(135deg,#0D1425 0%,#0A1020 100%);
-  border:1px solid #122040;border-radius:10px;
-}
-.sig-pill{
-  display:inline-flex;align-items:center;gap:.35rem;
-  padding:.3rem .7rem;border-radius:6px;font-size:.68rem;font-weight:600;
-  letter-spacing:.03em;border:1px solid;
-}
-.sig-pill .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-.sig-pill.s-hi{color:#00E676;border-color:rgba(0,230,118,.2);background:rgba(0,230,118,.06)}
-.sig-pill.s-hi .dot{background:#00E676;box-shadow:0 0 6px rgba(0,230,118,.5)}
-.sig-pill.s-elev{color:#FFB800;border-color:rgba(255,184,0,.2);background:rgba(255,184,0,.06)}
-.sig-pill.s-elev .dot{background:#FFB800;box-shadow:0 0 6px rgba(255,184,0,.5)}
-.sig-pill.s-vol{color:#FF5252;border-color:rgba(255,82,82,.2);background:rgba(255,82,82,.06)}
-.sig-pill.s-vol .dot{background:#FF5252;box-shadow:0 0 6px rgba(255,82,82,.5)}
-.sig-pill.s-low{color:#3D5A80;border-color:rgba(61,90,128,.25);background:rgba(61,90,128,.06)}
-.sig-pill.s-low .dot{background:#3D5A80}
-.sig-pill.s-info{color:#6B9CC0;border-color:rgba(107,156,192,.2);background:rgba(107,156,192,.06)}
-.sig-pill.s-info .dot{background:#00D4FF;box-shadow:0 0 4px rgba(0,212,255,.4)}
-
-/* ── KPI card ─────────────────────────────────────────────────────────── */
-.kpi{
-  background:linear-gradient(160deg,#0F1B30 0%,#0B1222 100%);
-  border:1px solid #152238;border-radius:12px;
-  padding:1.2rem 1rem 1rem;text-align:center;position:relative;overflow:hidden;
-  box-shadow:0 4px 24px rgba(0,0,0,.4);
-  transition:transform .2s ease,box-shadow .2s ease;
-}
-.kpi:hover{transform:translateY(-3px);box-shadow:0 8px 32px rgba(0,0,0,.5)}
-.kpi::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;border-radius:12px 12px 0 0}
-.kpi.kpi-b::before{background:linear-gradient(90deg,#00D4FF,#0099CC)}
-.kpi.kpi-g::before{background:linear-gradient(90deg,#00E676,#00B85C)}
-.kpi.kpi-r::before{background:linear-gradient(90deg,#FF5252,#CC3D3D)}
-.kpi.kpi-a::before{background:linear-gradient(90deg,#FFB800,#CC9300)}
-.kpi.kpi-p::before{background:linear-gradient(90deg,#BB86FC,#9B60E0)}
-.kpi .lb{font-size:.6rem;color:#3D5A80;text-transform:uppercase;letter-spacing:.1em;font-weight:600;margin-bottom:.4rem}
-.kpi .vl{font-size:1.9rem;font-weight:800;color:#E8ECF1;line-height:1.15}
-.kpi .vl.g{color:#00E676} .kpi .vl.r{color:#FF5252} .kpi .vl.b{color:#00D4FF}
-.kpi .vl.a{color:#FFB800} .kpi .vl.p{color:#BB86FC}
-
-/* ── Hero card (top story) ────────────────────────────────────────────── */
-.hero{
-  background:linear-gradient(145deg,#0F1B30 0%,#0B1525 100%);
-  border:1px solid #1E3A5F;border-left:4px solid #00D4FF;
-  border-radius:14px;padding:1.8rem 2rem;margin-bottom:1.2rem;
-  box-shadow:0 4px 30px rgba(0,212,255,.06),0 2px 16px rgba(0,0,0,.4);
-  position:relative;overflow:hidden;
-}
-.hero::after{content:"";position:absolute;top:0;right:0;width:200px;height:100%;background:radial-gradient(ellipse at top right,rgba(0,212,255,.04) 0%,transparent 70%);pointer-events:none}
-.hero .label{font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#00D4FF;margin-bottom:.6rem;display:flex;align-items:center;gap:.4rem}
-.hero .label .pulse{display:inline-block;width:7px;height:7px;border-radius:50%;background:#00D4FF;box-shadow:0 0 8px rgba(0,212,255,.6);animation:pulse-b 2s ease-in-out infinite}
-.hero h3{margin:0 0 .5rem 0!important;font-size:1.25rem!important;font-weight:800!important;color:#E8ECF1!important;line-height:1.3!important}
-.hero h3 a{color:#E8ECF1!important;text-decoration:none!important;transition:color .15s}
-.hero h3 a:hover{color:#00D4FF!important}
-.hero .meta{font-size:.72rem;color:#4A6A8A;margin-bottom:.7rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
-.hero .body{color:#A0B4CC;font-size:.9rem;line-height:1.65;margin-bottom:.6rem}
-.hero .wim{color:#FFB800;font-size:.82rem;font-style:italic;padding:.5rem 0 .5rem .8rem;border-left:2px solid rgba(255,184,0,.3);margin-bottom:.6rem}
-.hero .chips{display:flex;flex-wrap:wrap;gap:.35rem}
-@keyframes pulse-b{0%,100%{opacity:1}50%{opacity:.4}}
-
-/* ── Secondary briefing cards (breaking / AI opp / geo risk) ──────────── */
-.sec-card{
-  background:linear-gradient(145deg,#0F1B30 0%,#0B1222 100%);
-  border:1px solid #152238;border-radius:12px;padding:1.2rem 1.3rem;
-  box-shadow:0 2px 16px rgba(0,0,0,.35);height:100%;
-  transition:border-color .2s ease,box-shadow .2s ease;
-}
-.sec-card:hover{border-color:#1E3A5F;box-shadow:0 4px 24px rgba(0,0,0,.5)}
-.sec-card .label{font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.5rem;display:flex;align-items:center;gap:.35rem}
-.sec-card .label.l-brk{color:#FF5252}
-.sec-card .label.l-ai{color:#00D4FF}
-.sec-card .label.l-risk{color:#FFB800}
-.sec-card h4{margin:0 0 .35rem 0;color:#E8ECF1;font-size:.95rem;font-weight:700;line-height:1.3}
-.sec-card p{margin:0;color:#7A90A8;font-size:.82rem;line-height:1.55}
-
-/* ── Article card ─────────────────────────────────────────────────────── */
-.ac{
-  background:linear-gradient(160deg,#0F1B30 0%,#0B1222 100%);
-  border:1px solid #152238;border-radius:12px;
-  padding:1.2rem 1.4rem;margin-bottom:.8rem;
-  box-shadow:0 2px 12px rgba(0,0,0,.3);
-  transition:border-color .25s ease,box-shadow .25s ease;
-}
-.ac:hover{border-color:#1E3A5F;box-shadow:0 4px 20px rgba(0,212,255,.04)}
-.ac .ac-top{display:flex;align-items:flex-start;justify-content:space-between;gap:.8rem;margin-bottom:.4rem}
-.ac h4{margin:0;color:#E8ECF1;font-size:.95rem;font-weight:700;line-height:1.35;flex:1}
-.ac h4 a{color:#E8ECF1!important;text-decoration:none;transition:color .15s}
-.ac h4 a:hover{color:#00D4FF!important}
-.ac .ac-score{font-size:.72rem;font-weight:700;color:#00D4FF;white-space:nowrap;padding:.15rem .5rem;border:1px solid rgba(0,212,255,.2);border-radius:5px;background:rgba(0,212,255,.06)}
-.ac .meta{font-size:.68rem;color:#4A6A8A;margin-bottom:.55rem}
-.ac .summary{color:#8899AA;font-size:.84rem;line-height:1.6;margin-bottom:.5rem}
-.ac .wim{color:#FFB800;font-size:.8rem;font-style:italic;padding:.4rem 0 .4rem .7rem;border-left:2px solid rgba(255,184,0,.25);margin-bottom:.5rem}
-.ac .chips{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.3rem}
-
-/* ── Chip / badge system ──────────────────────────────────────────────── */
-.chip{display:inline-block;padding:.15rem .5rem;border-radius:5px;font-size:.65rem;font-weight:600;letter-spacing:.02em;border:1px solid}
-.chip-cat{color:#6BDDFF;border-color:rgba(0,212,255,.15);background:rgba(0,212,255,.06)}
-.chip-tag{color:#7A90A8;border-color:rgba(122,144,168,.15);background:rgba(122,144,168,.06)}
-.chip-brk{color:#FF5252;border-color:rgba(255,82,82,.25);background:rgba(255,82,82,.08);animation:pulse-red 2s ease-in-out infinite}
-.chip-hi{color:#FFB800;border-color:rgba(255,184,0,.2);background:rgba(255,184,0,.06)}
-.chip-med{color:#00D4FF;border-color:rgba(0,212,255,.15);background:rgba(0,212,255,.05)}
-.chip-lo{color:#3D6B5A;border-color:rgba(0,230,118,.12);background:rgba(0,230,118,.04)}
-@keyframes pulse-red{0%,100%{box-shadow:0 0 3px rgba(255,82,82,.15)}50%{box-shadow:0 0 10px rgba(255,82,82,.3)}}
-
-/* ── Briefing card (macro intel) ──────────────────────────────────────── */
-.brief{
-  background:linear-gradient(145deg,#0F1B30 0%,#0B1525 100%);
-  border:1px solid #152238;border-left:3px solid #FFB800;
-  border-radius:12px;padding:1.3rem 1.5rem;margin-bottom:.8rem;
-  box-shadow:0 2px 16px rgba(0,0,0,.3);
-  transition:border-color .2s ease;
-}
-.brief:hover{border-color:#1E3A5F}
-.brief h4{margin:0 0 .5rem 0;color:#FFB800;font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700}
-.brief p{margin:0;color:#A0B4CC;font-size:.86rem;line-height:1.65}
-.brief p strong{color:#D0D8E4}
-
-/* ── Asset card ───────────────────────────────────────────────────────── */
-.asc{
-  background:linear-gradient(160deg,#0F1B30 0%,#0B1222 100%);
-  border:1px solid #152238;border-radius:12px;
-  padding:1.3rem 1.4rem;margin-bottom:.8rem;
-  box-shadow:0 2px 16px rgba(0,0,0,.3);
-  transition:border-color .2s ease;
-}
-.asc:hover{border-color:#1E3A5F}
-.asc .hdr{display:flex;align-items:center;gap:.6rem;margin-bottom:.7rem;padding-bottom:.6rem;border-bottom:1px solid #152238}
-.asc .hdr .emoji{font-size:1.4rem}
-.asc .hdr .name{font-size:1rem;font-weight:800;color:#E8ECF1;flex:1}
-.asc .dir{display:inline-block;padding:.2rem .65rem;border-radius:6px;font-size:.7rem;font-weight:700;letter-spacing:.04em;border:1px solid}
-.asc .dir.up{color:#00E676;border-color:rgba(0,230,118,.25);background:rgba(0,230,118,.08)}
-.asc .dir.down{color:#FF5252;border-color:rgba(255,82,82,.25);background:rgba(255,82,82,.08)}
-.asc .dir.volatile{color:#FFB800;border-color:rgba(255,184,0,.25);background:rgba(255,184,0,.08)}
-.asc .dir.neutral{color:#6B7C93;border-color:rgba(107,124,147,.2);background:rgba(107,124,147,.06)}
-.asc .row{font-size:.82rem;color:#7A90A8;margin-bottom:.35rem;line-height:1.5}
-.asc .row strong{color:#A0B4CC;font-weight:600}
-.asc .conf{font-size:.7rem;color:#3D5A80;margin-top:.5rem;padding-top:.5rem;border-top:1px solid #152238}
-.asc .headlines{margin-top:.5rem;padding:0;list-style:none}
-.asc .headlines li{font-size:.75rem;color:#4A6A8A;margin-bottom:.2rem;padding-left:.8rem;position:relative}
-.asc .headlines li::before{content:"";position:absolute;left:0;top:.4rem;width:4px;height:4px;border-radius:50%;background:#00D4FF}
-
-/* ── Scenario card ────────────────────────────────────────────────────── */
-.sc{
-  background:linear-gradient(160deg,#0F1B30 0%,#0B1222 100%);
-  border:1px solid #152238;border-radius:12px;
-  padding:1.2rem 1.3rem;margin-bottom:.7rem;
-  box-shadow:0 2px 12px rgba(0,0,0,.25);
-  transition:border-color .2s ease;
-}
-.sc:hover{border-color:#1E3A5F}
-.sc .lbl{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.4rem}
-.sc .lbl.bull{color:#00E676} .sc .lbl.base{color:#00D4FF} .sc .lbl.risk{color:#FF5252}
-.sc p{margin:0;color:#7A90A8;font-size:.82rem;line-height:1.6}
-.sc:has(.lbl.bull){border-left:3px solid rgba(0,230,118,.35)}
-.sc:has(.lbl.base){border-left:3px solid rgba(0,212,255,.35)}
-.sc:has(.lbl.risk){border-left:3px solid rgba(255,82,82,.35)}
-
-/* ── Expander ─────────────────────────────────────────────────────────── */
-[data-testid="stExpander"]{border:1px solid #152238!important;border-radius:10px!important;background:#0B1222!important}
-[data-testid="stExpander"] summary{font-size:.78rem;color:#3D5A80;font-weight:600}
+[data-testid="stBottomBlockContainer"]{background:#060A12!important}
+[data-testid="stSidebar"]{background:linear-gradient(180deg,#050810 0%,#060A12 100%)!important;border-right:1px solid #0F1A2E}
+[data-testid="stSidebar"] hr{border-color:#0F1A2E!important;margin:.6rem 0!important}
+[data-testid="stTabs"] button{font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:.55rem 1.4rem;color:#2A4060;border:none;border-bottom:2px solid transparent;border-radius:0;transition:all .2s}
+[data-testid="stTabs"] button[aria-selected="true"]{color:#00D4FF;border-bottom-color:#00D4FF;background:linear-gradient(180deg,rgba(0,212,255,.03) 0%,transparent 100%)}
+[data-testid="stTabs"] button:hover:not([aria-selected="true"]){color:#4A7090}
+[data-testid="stTabs"] [role="tablist"]{border-bottom:1px solid #0F1A2E;gap:0}
+[data-testid="stExpander"]{border:1px solid #0F1A2E!important;border-radius:8px!important;background:#080D18!important}
+[data-testid="stExpander"] summary{font-size:.75rem;color:#2A4060;font-weight:600}
 [data-testid="stExpander"] summary:hover{color:#00D4FF}
 
-/* ── Footer ───────────────────────────────────────────────────────────── */
-.ftr{text-align:center;color:#2A3A50;font-size:.65rem;letter-spacing:.06em;padding:.8rem 0;text-transform:uppercase}
-</style>
-""", unsafe_allow_html=True)
+.sd{border:none;height:1px;background:linear-gradient(90deg,transparent,#0F1A2E 25%,#1A3050 50%,#0F1A2E 75%,transparent);margin:1.8rem 0}
+.sb-hdr{font-size:.58rem;text-transform:uppercase;letter-spacing:.12em;color:#1A3050;font-weight:700;margin:.8rem 0 .3rem 0}
 
+/* command header */
+.cmd{display:flex;align-items:baseline;justify-content:space-between;padding:.4rem 0 .6rem;border-bottom:1px solid #0F1A2E;margin-bottom:.6rem}
+.cmd .t{font-size:1.3rem;font-weight:800;color:#D0D8E4;letter-spacing:-.02em}.cmd .t span{color:#00D4FF}
+.cmd .m{font-size:.6rem;color:#1A3050;letter-spacing:.06em;text-transform:uppercase}
 
-# ╔═════════════════════════════════════════════════════════════════════════╗
-# ║  HTML HELPERS                                                         ║
-# ╚═════════════════════════════════════════════════════════════════════════╝
+/* signal strip */
+.sig{display:flex;flex-wrap:wrap;gap:.4rem;padding:.55rem .8rem;margin:.5rem 0 1rem;background:#080D18;border:1px solid #0F1A2E;border-radius:8px}
+.sp{display:inline-flex;align-items:center;gap:.3rem;padding:.22rem .55rem;border-radius:5px;font-size:.6rem;font-weight:700;letter-spacing:.03em;border:1px solid}
+.sp .d{width:5px;height:5px;border-radius:50%;flex-shrink:0}
+.sp.hi{color:#00E676;border-color:rgba(0,230,118,.18);background:rgba(0,230,118,.04)}.sp.hi .d{background:#00E676;box-shadow:0 0 5px rgba(0,230,118,.5)}
+.sp.el{color:#FFB800;border-color:rgba(255,184,0,.18);background:rgba(255,184,0,.04)}.sp.el .d{background:#FFB800;box-shadow:0 0 5px rgba(255,184,0,.5)}
+.sp.cr{color:#FF5252;border-color:rgba(255,82,82,.18);background:rgba(255,82,82,.04)}.sp.cr .d{background:#FF5252;box-shadow:0 0 5px rgba(255,82,82,.5)}
+.sp.lo{color:#1A3050;border-color:rgba(26,48,80,.3);background:rgba(26,48,80,.04)}.sp.lo .d{background:#1A3050}
+.sp.nf{color:#4A7090;border-color:rgba(74,112,144,.18);background:rgba(74,112,144,.04)}.sp.nf .d{background:#00D4FF;box-shadow:0 0 4px rgba(0,212,255,.3)}
 
-def kpi(label, value, color="b"):
-    c = f" {color}" if color else ""
-    return (
-        f'<div class="kpi kpi-{color}">'
-        f'<div class="lb">{label}</div>'
-        f'<div class="vl{c}">{value}</div>'
-        f'</div>'
-    )
+/* KPI */
+.k{background:linear-gradient(160deg,#0A1020 0%,#080D18 100%);border:1px solid #0F1A2E;border-radius:10px;padding:1rem .8rem;text-align:center;position:relative;overflow:hidden;box-shadow:0 3px 16px rgba(0,0,0,.4);transition:transform .2s,box-shadow .2s}
+.k:hover{transform:translateY(-2px);box-shadow:0 6px 24px rgba(0,0,0,.5)}
+.k::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;border-radius:10px 10px 0 0}
+.k.kb::before{background:#00D4FF}.k.kg::before{background:#00E676}.k.kr::before{background:#FF5252}.k.ka::before{background:#FFB800}.k.kp::before{background:#BB86FC}
+.k .kl{font-size:.55rem;color:#1A3050;text-transform:uppercase;letter-spacing:.1em;font-weight:600;margin-bottom:.3rem}
+.k .kv{font-size:1.6rem;font-weight:800;line-height:1.15}
+.k .kv.b{color:#00D4FF}.k .kv.g{color:#00E676}.k .kv.r{color:#FF5252}.k .kv.a{color:#FFB800}.k .kv.p{color:#BB86FC}.k .kv.w{color:#D0D8E4}
 
+/* hero */
+.hero{background:linear-gradient(145deg,#0A1020 0%,#080D18 100%);border:1px solid #0F1A2E;border-left:3px solid #00D4FF;border-radius:12px;padding:1.4rem 1.6rem;margin-bottom:1rem;box-shadow:0 3px 20px rgba(0,212,255,.04);position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;top:0;right:0;width:180px;height:100%;background:radial-gradient(ellipse at top right,rgba(0,212,255,.03) 0%,transparent 70%);pointer-events:none}
+.hero .hl{font-size:.58rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#00D4FF;margin-bottom:.5rem;display:flex;align-items:center;gap:.35rem}
+.hero .hl .p{display:inline-block;width:6px;height:6px;border-radius:50%;background:#00D4FF;box-shadow:0 0 7px rgba(0,212,255,.6);animation:pb 2s ease-in-out infinite}
+.hero h3{margin:0 0 .4rem!important;font-size:1.15rem!important;font-weight:800!important;color:#D0D8E4!important;line-height:1.3!important}
+.hero h3 a{color:#D0D8E4!important;text-decoration:none!important}.hero h3 a:hover{color:#00D4FF!important}
+.hero .mt{font-size:.65rem;color:#2A4060;margin-bottom:.5rem}
+.hero .bd{color:#6B9CC0;font-size:.84rem;line-height:1.6;margin-bottom:.5rem}
+.hero .wm{color:#FFB800;font-size:.78rem;font-style:italic;padding:.4rem 0 .4rem .7rem;border-left:2px solid rgba(255,184,0,.25);margin-bottom:.5rem}
+@keyframes pb{0%,100%{opacity:1}50%{opacity:.35}}
 
-def urgency_chip(u):
-    cls = {"breaking": "chip-brk", "high": "chip-hi", "medium": "chip-med", "low": "chip-lo"}.get(u, "chip-lo")
-    return f'<span class="chip {cls}">{u.upper()}</span>'
+/* secondary card */
+.sc2{background:#0A1020;border:1px solid #0F1A2E;border-radius:10px;padding:1rem 1.1rem;box-shadow:0 2px 12px rgba(0,0,0,.3);height:100%;transition:border-color .2s}
+.sc2:hover{border-color:#1A3050}
+.sc2 .sl{font-size:.55rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.4rem;display:flex;align-items:center;gap:.3rem}
+.sc2 .sl.lb{color:#FF5252}.sc2 .sl.la{color:#00D4FF}.sc2 .sl.lr{color:#FFB800}.sc2 .sl.lm{color:#BB86FC}.sc2 .sl.le{color:#00E676}
+.sc2 h4{margin:0 0 .3rem;color:#D0D8E4;font-size:.88rem;font-weight:700;line-height:1.3}
+.sc2 p{margin:0;color:#4A6A8A;font-size:.78rem;line-height:1.5}
 
+/* article card */
+.ac{background:#0A1020;border:1px solid #0F1A2E;border-radius:10px;padding:1rem 1.2rem;margin-bottom:.65rem;transition:border-color .2s,box-shadow .2s}
+.ac:hover{border-color:#1A3050;box-shadow:0 3px 16px rgba(0,212,255,.03)}
+.ac .at{display:flex;align-items:flex-start;justify-content:space-between;gap:.6rem;margin-bottom:.3rem}
+.ac h4{margin:0;color:#D0D8E4;font-size:.88rem;font-weight:700;line-height:1.3;flex:1}
+.ac h4 a{color:#D0D8E4!important;text-decoration:none}.ac h4 a:hover{color:#00D4FF!important}
+.ac .as{font-size:.65rem;font-weight:700;color:#00D4FF;white-space:nowrap;padding:.12rem .4rem;border:1px solid rgba(0,212,255,.18);border-radius:4px;background:rgba(0,212,255,.04)}
+.ac .mt{font-size:.62rem;color:#2A4060;margin-bottom:.4rem}
+.ac .bd{color:#4A6A8A;font-size:.8rem;line-height:1.55;margin-bottom:.4rem}
+.ac .wm{color:#FFB800;font-size:.75rem;font-style:italic;padding:.3rem 0 .3rem .6rem;border-left:2px solid rgba(255,184,0,.2);margin-bottom:.4rem}
+.ac .ch{display:flex;flex-wrap:wrap;gap:.25rem;margin-top:.25rem}
 
-def signal_pill(label, value, level):
-    return f'<span class="sig-pill s-{level}"><span class="dot"></span>{label}: {value}</span>'
+/* chips */
+.c{display:inline-block;padding:.12rem .4rem;border-radius:4px;font-size:.58rem;font-weight:600;letter-spacing:.02em;border:1px solid}
+.cc{color:#4ECDC4;border-color:rgba(0,212,255,.12);background:rgba(0,212,255,.04)}
+.ct{color:#4A6A8A;border-color:rgba(74,106,138,.12);background:rgba(74,106,138,.04)}
+.cb{color:#FF5252;border-color:rgba(255,82,82,.2);background:rgba(255,82,82,.06);animation:pr 2s ease-in-out infinite}
+.chi{color:#FFB800;border-color:rgba(255,184,0,.15);background:rgba(255,184,0,.04)}
+.cm{color:#00D4FF;border-color:rgba(0,212,255,.12);background:rgba(0,212,255,.04)}
+.cl{color:#1A3A50;border-color:rgba(0,230,118,.1);background:rgba(0,230,118,.03)}
+@keyframes pr{0%,100%{box-shadow:0 0 2px rgba(255,82,82,.1)}50%{box-shadow:0 0 8px rgba(255,82,82,.25)}}
 
+/* briefing */
+.bf{background:#0A1020;border:1px solid #0F1A2E;border-left:3px solid #FFB800;border-radius:10px;padding:1.1rem 1.3rem;margin-bottom:.65rem;transition:border-color .2s}
+.bf:hover{border-color:#1A3050}
+.bf h4{margin:0 0 .4rem;color:#FFB800;font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700}
+.bf p{margin:0;color:#6B9CC0;font-size:.82rem;line-height:1.6}.bf p strong{color:#A0B4CC}
 
-def hero_card(a):
-    """Full-width featured story card."""
-    title = a.get("title", "Untitled")
-    url = a.get("url", "")
-    th = f'<a href="{url}" target="_blank">{title}</a>' if url else title
-    src = a.get("source", "")
-    ts = a.get("published_at", "")[:16].replace("T", " ")
-    score = a.get("relevance_score", 0)
-    uc = urgency_chip(a.get("urgency", "low"))
-    summary = a.get("short_summary", "")
-    wim = a.get("why_it_matters", "")
-    wim_html = f'<div class="wim">Why it matters: {wim}</div>' if wim else ""
-    tags = a.get("tags", [])
-    cat = a.get("category", "")
-    chips = f'<span class="chip chip-cat">{cat}</span>' if cat else ""
-    chips += "".join(f'<span class="chip chip-tag">{t}</span>' for t in tags[:4])
-    return (
-        f'<div class="hero">'
-        f'<div class="label"><span class="pulse"></span> TOP STORY</div>'
-        f'<h3>{th}</h3>'
-        f'<div class="meta">{src} &middot; {ts} &middot; {uc} &middot; Relevance: {score:.0%}</div>'
-        f'<div class="body">{summary}</div>'
-        f'{wim_html}'
-        f'<div class="chips">{chips}</div>'
-        f'</div>'
-    )
+/* asset card */
+.asc{background:#0A1020;border:1px solid #0F1A2E;border-radius:10px;padding:1.1rem 1.2rem;margin-bottom:.65rem;transition:border-color .2s}
+.asc:hover{border-color:#1A3050}
+.asc .hd{display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem;padding-bottom:.4rem;border-bottom:1px solid #0F1A2E}
+.asc .hd .em{font-size:1.2rem}.asc .hd .nm{font-size:.9rem;font-weight:800;color:#D0D8E4;flex:1}
+.asc .dr{display:inline-block;padding:.15rem .5rem;border-radius:5px;font-size:.62rem;font-weight:700;letter-spacing:.04em;border:1px solid}
+.asc .dr.up{color:#00E676;border-color:rgba(0,230,118,.2);background:rgba(0,230,118,.06)}
+.asc .dr.dn{color:#FF5252;border-color:rgba(255,82,82,.2);background:rgba(255,82,82,.06)}
+.asc .dr.vl{color:#FFB800;border-color:rgba(255,184,0,.2);background:rgba(255,184,0,.06)}
+.asc .dr.nt{color:#4A6A8A;border-color:rgba(74,106,138,.15);background:rgba(74,106,138,.04)}
+.asc .rw{font-size:.78rem;color:#4A6A8A;margin-bottom:.25rem;line-height:1.45}.asc .rw strong{color:#6B9CC0;font-weight:600}
+.asc .cf{font-size:.65rem;color:#1A3050;margin-top:.4rem;padding-top:.4rem;border-top:1px solid #0F1A2E}
 
+/* scenario */
+.sn{background:#0A1020;border:1px solid #0F1A2E;border-radius:10px;padding:1rem 1.1rem;margin-bottom:.6rem;transition:border-color .2s}
+.sn:hover{border-color:#1A3050}
+.sn .lb{font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.3rem}
+.sn .lb.bu{color:#00E676}.sn .lb.ba{color:#00D4FF}.sn .lb.ri{color:#FF5252}
+.sn p{margin:0;color:#4A6A8A;font-size:.78rem;line-height:1.55}
+.sn:has(.lb.bu){border-left:2px solid rgba(0,230,118,.3)}
+.sn:has(.lb.ba){border-left:2px solid rgba(0,212,255,.3)}
+.sn:has(.lb.ri){border-left:2px solid rgba(255,82,82,.3)}
 
-def secondary_card(label, label_cls, a):
-    """Compact secondary briefing card."""
-    if not a:
-        return (
-            f'<div class="sec-card">'
-            f'<div class="label {label_cls}">{label}</div>'
-            f'<h4>No stories at this time</h4>'
-            f'<p>—</p></div>'
-        )
-    title = a.get("title", "")
-    summary = a.get("short_summary", "")[:180]
-    return (
-        f'<div class="sec-card">'
-        f'<div class="label {label_cls}">{label}</div>'
-        f'<h4>{title}</h4>'
-        f'<p>{summary}</p></div>'
-    )
+/* prediction card */
+.pd{background:#0A1020;border:1px solid #0F1A2E;border-radius:10px;padding:.9rem 1rem;margin-bottom:.5rem;transition:border-color .2s}
+.pd:hover{border-color:#1A3050}
+.pd .pl{font-size:.55rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#2A4060;margin-bottom:.25rem}
+.pd .pv{font-size:1rem;font-weight:800;margin-bottom:.2rem}
+.pd .pv.hi{color:#00E676}.pd .pv.el{color:#FFB800}.pd .pv.cr{color:#FF5252}.pd .pv.lo{color:#2A4060}.pd .pv.nf{color:#4A7090}
+.pd .pp{font-size:.7rem;color:#4A6A8A;line-height:1.45;margin:0}
+.pd .ps{font-size:.6rem;color:#1A3050;margin-top:.2rem}
 
+/* section header */
+.sh{margin:0 0 1rem;padding-bottom:.5rem;border-bottom:1px solid #0F1A2E}
+.sh h2{margin:0!important;padding:0!important;font-size:.9rem!important;font-weight:700!important;color:#D0D8E4!important;letter-spacing:-.01em!important}
+.sh .su{font-size:.58rem;color:#1A3050;text-transform:uppercase;letter-spacing:.08em;margin-top:.1rem}
 
-def _time_ago(iso_ts: str) -> str:
-    """Convert ISO timestamp to '2h ago' style label."""
-    if not iso_ts:
-        return ""
+.ftr{text-align:center;color:#1A3050;font-size:.58rem;letter-spacing:.06em;padding:.6rem 0;text-transform:uppercase}
+</style>""", unsafe_allow_html=True)
+
+# ═══════════════════════ HELPERS ═════════════════════════════════════════
+
+def _kpi(label, value, color="b"):
+    return f'<div class="k k{color}"><div class="kl">{label}</div><div class="kv {color}">{value}</div></div>'
+
+def _pill(label, value, level):
+    return f'<span class="sp {level}"><span class="d"></span>{label}: {value}</span>'
+
+def _uchip(u):
+    cls={"breaking":"cb","high":"chi","medium":"cm","low":"cl"}.get(u,"cl")
+    return f'<span class="c {cls}">{u.upper()}</span>'
+
+def _time_ago(iso):
+    if not iso: return ""
     try:
-        dt = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
-        delta = datetime.now(timezone.utc) - dt
-        hours = delta.total_seconds() / 3600
-        if hours < 1:
-            return f"{int(delta.total_seconds() / 60)}m ago"
-        if hours < 24:
-            return f"{int(hours)}h ago"
-        return f"{int(hours / 24)}d ago"
-    except (ValueError, TypeError):
-        return ""
+        dt=datetime.fromisoformat(iso.replace("Z","+00:00"))
+        h=(datetime.now(timezone.utc)-dt).total_seconds()/3600
+        if h<1: return f"{int(h*60)}m ago"
+        if h<24: return f"{int(h)}h ago"
+        return f"{int(h/24)}d ago"
+    except: return ""
 
+def _hero(a):
+    t=a.get("title","");u=a.get("url","");th=f'<a href="{u}" target="_blank">{t}</a>' if u else t
+    s=a.get("source","");ts=a.get("published_at","")[:16].replace("T"," ");age=_time_ago(a.get("published_at",""))
+    sc=a.get("relevance_score",0);uc=_uchip(a.get("urgency","low"))
+    sm=a.get("short_summary","");wim=a.get("why_it_matters","")
+    wh=f'<div class="wm">Why it matters: {wim}</div>' if wim else ""
+    cat=a.get("category","");tags=a.get("tags",[])
+    ch=f'<span class="c cc">{cat}</span>' if cat else ""
+    r=a.get("region","");ch+=f'<span class="c ct">{r}</span>' if r and r!="Global" else ""
+    ch+="".join(f'<span class="c ct">{x}</span>' for x in tags[:3])
+    return f'<div class="hero"><div class="hl"><span class="p"></span>TOP STORY</div><h3>{th}</h3><div class="mt">{s} · {ts} · {age} · {uc} · {sc:.0%}</div><div class="bd">{sm}</div>{wh}<div class="ch">{ch}</div></div>'
 
-def article_card(a):
-    """Standard article card with chip system and freshness."""
-    title = a.get("title", "Untitled")
-    url = a.get("url", "")
-    th = f'<a href="{url}" target="_blank">{title}</a>' if url else title
-    src = a.get("source", "Unknown")
-    ts = a.get("published_at", "")[:16].replace("T", " ")
-    age = _time_ago(a.get("published_at", ""))
-    age_html = f' &middot; <span style="color:#3D5A80">{age}</span>' if age else ""
-    score = a.get("relevance_score", 0)
-    uc = urgency_chip(a.get("urgency", "low"))
-    summary = a.get("short_summary", "")
-    wim = a.get("why_it_matters", "")
-    wim_html = f'<div class="wim">Why it matters: {wim}</div>' if wim else ""
-    cat = a.get("category", "")
-    region = a.get("region", "")
-    tags = a.get("tags", [])
-    chips = f'<span class="chip chip-cat">{cat}</span>' if cat else ""
-    if region and region != "Global":
-        chips += f'<span class="chip chip-tag">{region}</span>'
-    chips += "".join(f'<span class="chip chip-tag">{t}</span>' for t in tags[:3])
-    return (
-        f'<div class="ac">'
-        f'<div class="ac-top"><h4>{th}</h4><span class="ac-score">{score:.0%}</span></div>'
-        f'<div class="meta">{src} &middot; {ts}{age_html} &middot; {uc}</div>'
-        f'<div class="summary">{summary}</div>'
-        f'{wim_html}'
-        f'<div class="chips">{chips}</div>'
-        f'</div>'
-    )
+def _sec(label, cls, a):
+    if not a: return f'<div class="sc2"><div class="sl {cls}">{label}</div><h4>No stories</h4><p>—</p></div>'
+    return f'<div class="sc2"><div class="sl {cls}">{label}</div><h4>{a["title"]}</h4><p>{a.get("short_summary","")[:160]}</p></div>'
 
+def _ac(a):
+    t=a.get("title","");u=a.get("url","");th=f'<a href="{u}" target="_blank">{t}</a>' if u else t
+    s=a.get("source","");ts=a.get("published_at","")[:16].replace("T"," ");age=_time_ago(a.get("published_at",""))
+    sc=a.get("relevance_score",0);uc=_uchip(a.get("urgency","low"))
+    sm=a.get("short_summary","");wim=a.get("why_it_matters","")
+    wh=f'<div class="wm">Why it matters: {wim}</div>' if wim else ""
+    cat=a.get("category","");tags=a.get("tags",[]);r=a.get("region","")
+    ch=f'<span class="c cc">{cat}</span>' if cat else ""
+    ch+=f'<span class="c ct">{r}</span>' if r and r!="Global" else ""
+    ch+="".join(f'<span class="c ct">{x}</span>' for x in tags[:3])
+    return f'<div class="ac"><div class="at"><h4>{th}</h4><span class="as">{sc:.0%}</span></div><div class="mt">{s} · {ts} · {age} · {uc}</div><div class="bd">{sm}</div>{wh}<div class="ch">{ch}</div></div>'
 
-def briefing_card(title, body):
-    return f'<div class="brief"><h4>{title}</h4><p>{body}</p></div>'
+def _bf(title,body): return f'<div class="bf"><h4>{title}</h4><p>{body}</p></div>'
 
+def _asc(v):
+    d=v["direction"];dc={"up":"up","down":"dn","volatile":"vl"}.get(d,"nt")
+    th=", ".join(v.get("driving_themes",[]))
+    return f'<div class="asc"><div class="hd"><span class="em">{v["emoji"]}</span><span class="nm">{v["label"]}</span><span class="dr {dc}">{d.upper()}</span></div><div class="rw"><strong>Immediate:</strong> {v["immediate_reaction"]}</div><div class="rw"><strong>Short-term:</strong> {v["short_term_direction"]}</div><div class="rw"><strong>Risk trigger:</strong> {v["risk_reversal_trigger"]}</div><div class="rw"><strong>Drivers:</strong> {th}</div><div class="cf">Confidence: {v["confidence"]:.0%} · Signal: {v["signal_strength"]}</div></div>'
 
-def asset_card_html(v):
-    d = v["direction"]
-    dcls = {"up": "up", "down": "down", "volatile": "volatile"}.get(d, "neutral")
-    headlines_li = "".join(f"<li>{h}</li>" for h in v.get("supporting_headlines", [])[:3])
-    headlines_html = f'<ul class="headlines">{headlines_li}</ul>' if headlines_li else ""
-    themes = ", ".join(v.get("driving_themes", []))
-    return (
-        f'<div class="asc">'
-        f'<div class="hdr"><span class="emoji">{v["emoji"]}</span>'
-        f'<span class="name">{v["label"]}</span>'
-        f'<span class="dir {dcls}">{d.upper()}</span></div>'
-        f'<div class="row"><strong>Immediate:</strong> {v["immediate_reaction"]}</div>'
-        f'<div class="row"><strong>Short-term:</strong> {v["short_term_direction"]}</div>'
-        f'<div class="row"><strong>Risk trigger:</strong> {v["risk_reversal_trigger"]}</div>'
-        f'<div class="row"><strong>Why it matters:</strong> {v["why_this_matters"]}</div>'
-        f'<div class="row"><strong>Drivers:</strong> {themes}</div>'
-        f'<div class="conf">Confidence: {v["confidence"]:.0%} &middot; Signal: {v["signal_strength"]}</div>'
-        f'{headlines_html}'
-        f'</div>'
-    )
+def _sn(label,text,cls): return f'<div class="sn"><div class="lb {cls}">{label}</div><p>{text}</p></div>'
 
+def _pd(label,level,detail,score):
+    lc={"HIGH":"cr","ELEVATED":"el","STRONG":"hi","MODERATE":"el","RISK-OFF LIKELY":"cr","VOLATILE":"el","RISK-ON BIAS":"hi","NEUTRAL":"lo","QUIET":"lo","LOW":"lo","NO DATA":"lo"}.get(level,"nf")
+    return f'<div class="pd"><div class="pl">{label}</div><div class="pv {lc}">{level}</div><div class="pp">{detail}</div><div class="ps">Score: {score:.0%}</div></div>'
 
-def scenario_card(label, text, cls):
-    return f'<div class="sc"><div class="lbl {cls}">{label}</div><p>{text}</p></div>'
-
-
-def section_header(title, subtitle=""):
-    sub = f'<div class="sub">{subtitle}</div>' if subtitle else ""
-    return f'<div class="sh"><h2>{title}</h2>{sub}</div>'
-
+def _sh(t,s=""): return f'<div class="sh"><h2>{t}</h2>{"<div class=\"su\">"+s+"</div>" if s else ""}</div>'
 
 def _parse_date(iso):
-    if not iso:
-        return None
-    try:
-        return datetime.fromisoformat(iso.replace("Z", "+00:00")).date()
-    except (ValueError, TypeError):
-        return None
+    if not iso: return None
+    try: return datetime.fromisoformat(iso.replace("Z","+00:00")).date()
+    except: return None
 
+def _plotly_dark(fig):
+    fig.update_layout(**_PLT)
+    return fig
 
-# ╔═════════════════════════════════════════════════════════════════════════╗
-# ║  LOAD DATA                                                            ║
-# ╚═════════════════════════════════════════════════════════════════════════╝
-all_articles = get_articles(limit=500)
-total_articles = get_article_count()
-total_runs = get_run_count()
-last_run = get_last_run()
-qa_stats = get_qa_stats()
-db_categories = get_distinct_categories()
-db_sources = get_distinct_sources()
-db_regions = get_distinct_regions()
-latest_briefing_row = get_latest_briefing()
-briefing_data = latest_briefing_row["data"] if latest_briefing_row else {}
-freshness = get_freshness_info()
+# ═══════════════════════ LOAD DATA ═══════════════════════════════════════
+all_articles=get_articles(limit=500);total_articles=get_article_count()
+total_runs=get_run_count();last_run=get_last_run();qa=get_qa_stats()
+db_cats=get_distinct_categories();db_src=get_distinct_sources();db_reg=get_distinct_regions()
+brow=get_latest_briefing();bdata=brow["data"] if brow else {}
+fresh=get_freshness_info();outlook=generate_outlook(all_articles)
 
-# Compute signal values from articles
-_cat_counts = Counter(a.get("category", "") for a in all_articles)
-_ai_count = _cat_counts.get("AI", 0) + _cat_counts.get("AI Coding", 0) + _cat_counts.get("AI Trading", 0)
-_geo_count = _cat_counts.get("Geopolitics", 0)
-_market_count = _cat_counts.get("Markets", 0)
-_energy_count = _cat_counts.get("Energy", 0)
-_breaking_count = sum(1 for a in all_articles if a.get("urgency") == "breaking")
-_source_count = len(db_sources)
+cc=Counter(a.get("category","") for a in all_articles)
+_ai=cc.get("AI",0)+cc.get("AI Coding",0)+cc.get("AI Trading",0)
+_geo=cc.get("Geopolitics",0)+cc.get("Military / Security",0)
+_brk=sum(1 for a in all_articles if a.get("urgency")=="breaking")
+age=fresh["hours_since_sweep"]
 
-
-# ╔═════════════════════════════════════════════════════════════════════════╗
-# ║  SIDEBAR                                                              ║
-# ╚═════════════════════════════════════════════════════════════════════════╝
+# ═══════════════════════ SIDEBAR ═════════════════════════════════════════
 with st.sidebar:
-    st.markdown('<div class="sb-hdr">Refresh</div>', unsafe_allow_html=True)
-    _rc1, _rc2 = st.columns([1, 1])
-    with _rc1:
-        if st.button("Refresh Now", use_container_width=True, type="primary"):
-            st.rerun()
-    with _rc2:
-        auto_refresh_on = st.toggle("Auto", value=False, key="_auto_refresh_toggle")
-
-    INTERVAL_OPTIONS = {"Manual only": 0, "1 minute": 60, "5 minutes": 300, "15 minutes": 900}
-    if auto_refresh_on:
-        interval_label = st.selectbox(
-            "Interval", options=list(INTERVAL_OPTIONS.keys())[1:],
-            index=0, key="_refresh_interval",
-        )
-        refresh_seconds = INTERVAL_OPTIONS[interval_label]
-    else:
-        interval_label = "Manual only"
-        refresh_seconds = 0
-
-    now_for_display = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
-    st.caption(f"Loaded: {now_for_display}")
-
-    st.markdown('<div class="sb-hdr">Intelligence Filters</div>', unsafe_allow_html=True)
-    f_categories = st.multiselect("Category", options=db_categories, default=[], placeholder="All categories")
-    f_regions = st.multiselect("Region", options=db_regions, default=[], placeholder="All regions")
-    f_sources = st.multiselect("Source", options=db_sources, default=[], placeholder="All sources")
-    f_urgency = st.multiselect("Urgency", options=["breaking", "high", "medium", "low"], default=[], placeholder="All levels")
-    f_relevance = st.slider("Min relevance", 0.0, 1.0, 0.0, 0.05)
-    dates = [_parse_date(a.get("published_at", "")) for a in all_articles]
-    valid_dates = [d for d in dates if d]
-    if valid_dates:
-        f_date_range = st.date_input("Date range", value=(min(valid_dates), max(valid_dates)),
-                                     min_value=min(valid_dates), max_value=max(valid_dates))
-    else:
-        f_date_range = None
-    f_keyword = st.text_input("Keyword search", placeholder="Search titles & summaries...")
-
-    st.markdown('<div class="sb-hdr">System</div>', unsafe_allow_html=True)
-    mode_label = "LLM" if settings.llm_enabled else "Rules"
-    news_label = "NewsAPI + RSS" if settings.newsapi_enabled else "RSS only"
-    st.caption(f"Agent: **{mode_label}** · Providers: **{news_label}**")
+    st.markdown('<div class="sb-hdr">Refresh</div>',unsafe_allow_html=True)
+    r1,r2=st.columns([1,1])
+    with r1:
+        if st.button("Refresh Now",use_container_width=True,type="primary"): st.rerun()
+    with r2: aro=st.toggle("Auto",value=False,key="_art")
+    IO={"Manual":0,"1 min":60,"5 min":300,"15 min":900}
+    if aro:
+        il=st.selectbox("Interval",list(IO.keys())[1:],index=0,key="_ri");rs=IO[il]
+    else: il="Manual";rs=0
+    st.caption(f"Loaded: {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
+    st.markdown('<div class="sb-hdr">Filters</div>',unsafe_allow_html=True)
+    fc=st.multiselect("Category",db_cats,default=[],placeholder="All")
+    fr=st.multiselect("Region",db_reg,default=[],placeholder="All")
+    fs=st.multiselect("Source",db_src,default=[],placeholder="All")
+    fu=st.multiselect("Urgency",["breaking","high","medium","low"],default=[],placeholder="All")
+    frl=st.slider("Min relevance",0.0,1.0,0.0,0.05)
+    dd=[_parse_date(a.get("published_at","")) for a in all_articles];vd=[d for d in dd if d]
+    fdr=st.date_input("Date range",(min(vd),max(vd)),min_value=min(vd),max_value=max(vd)) if vd else None
+    fk=st.text_input("Keyword",placeholder="Search...")
+    st.markdown('<div class="sb-hdr">System</div>',unsafe_allow_html=True)
+    ml="LLM" if settings.llm_enabled else "Rules";nl="NewsAPI+RSS" if settings.newsapi_enabled else "RSS"
+    st.caption(f"Agent: **{ml}** · Src: **{nl}**")
     st.caption(f"Articles: **{total_articles}** · Runs: **{total_runs}**")
 
+# auto-refresh
+if rs>0:
+    @st.fragment(run_every=timedelta(seconds=rs))
+    def _arf():
+        if "_at" not in st.session_state: st.session_state._at=time.time();return
+        if time.time()-st.session_state._at>=rs*.8: st.session_state._at=time.time();st.rerun(scope="app")
+    _arf()
 
-# ╔═════════════════════════════════════════════════════════════════════════╗
-# ║  AUTO-REFRESH FRAGMENT                                                ║
-# ╚═════════════════════════════════════════════════════════════════════════╝
-if refresh_seconds > 0:
-    @st.fragment(run_every=timedelta(seconds=refresh_seconds))
-    def _auto_refresher():
-        if "_arf_ts" not in st.session_state:
-            st.session_state._arf_ts = time.time()
-            return
-        if time.time() - st.session_state._arf_ts >= refresh_seconds * 0.8:
-            st.session_state._arf_ts = time.time()
-            st.rerun(scope="app")
-    _auto_refresher()
+# ═══════════════════════ HEADER ══════════════════════════════════════════
+sts=last_run["created_at"][:16].replace("T"," ")+" UTC" if last_run else "—"
+ags=f"{age:.1f}h ago" if age is not None else "never"
+st.markdown(f'<div class="cmd"><div class="t">AI <span>Chief Agent</span></div><div class="m">Sweep: {sts} ({ags}) · {ml} · {nl}</div></div>',unsafe_allow_html=True)
+if fresh["is_stale"]: st.warning(f"Data may be stale — last sweep {ags} ({fresh['last_sweep_article_count']} articles). Run `python main.py`.",icon="⚠️")
 
+# signal strip
+al="hi" if _ai>=5 else "el" if _ai>=2 else "lo";av="HIGH" if _ai>=5 else "MOD" if _ai>=2 else "LOW"
+gl="cr" if _geo>=5 else "el" if _geo>=2 else "lo";gv="ELEVATED" if _geo>=2 else "CALM"
+bl="cr" if _brk>=2 else "el" if _brk>=1 else "lo"
+el=outlook["escalation_risk"]["level"][:4];ec="cr" if el in("HIGH","ELEV") else "el" if el=="MODE" else "lo"
+ml2=outlook["market_reaction"]["level"][:8];mc2="cr" if "OFF" in ml2 else "el" if "VOL" in ml2 else "hi" if "ON" in ml2 else "lo"
+st.markdown('<div class="sig">'+_pill("AI PULSE",av,al)+_pill("GEO RISK",gv,gl)+_pill("ESCALATION",outlook["escalation_risk"]["level"],ec)+_pill("MARKETS",outlook["market_reaction"]["level"],mc2)+_pill("BREAKING",str(_brk),bl)+_pill("SWEEP",ags,"cr" if fresh["is_stale"] else "nf")+_pill("ARTICLES",str(fresh["last_sweep_article_count"]),"nf")+'</div>',unsafe_allow_html=True)
 
-# ╔═════════════════════════════════════════════════════════════════════════╗
-# ║  COMMAND CENTER HEADER                                                ║
-# ╚═════════════════════════════════════════════════════════════════════════╝
-sweep_ts = last_run["created_at"][:16].replace("T", " ") + " UTC" if last_run else "—"
-hours_ago = freshness["hours_since_sweep"]
-age_str = f"{hours_ago:.1f}h ago" if hours_ago is not None else "never"
-st.markdown(
-    f'<div class="cmd-hdr">'
-    f'<div class="title">AI <span>Chief Agent</span></div>'
-    f'<div class="meta">Sweep: {sweep_ts} ({age_str}) &nbsp;·&nbsp; {mode_label} mode &nbsp;·&nbsp; {news_label}</div>'
-    f'</div>',
-    unsafe_allow_html=True,
-)
+# ═══════════════════════ TABS ════════════════════════════════════════════
+t1,t2,t3=st.tabs(["INTELLIGENCE FEED","WORLD INTEL MAP","MACRO INTELLIGENCE"])
 
-# Stale data warning
-if freshness["is_stale"]:
-    st.warning(
-        f"Data may be stale — last sweep was {hours_ago:.1f} hours ago "
-        f"({freshness['last_sweep_article_count']} articles). "
-        f"Run `python main.py` to fetch fresh intelligence.",
-        icon="⚠️",
-    )
+# filter
+flt=all_articles
+if fc: flt=[a for a in flt if a.get("category") in fc]
+if fr: flt=[a for a in flt if a.get("region") in fr]
+if fs: flt=[a for a in flt if a.get("source") in fs]
+if fu: flt=[a for a in flt if a.get("urgency") in fu]
+if frl>0: flt=[a for a in flt if (a.get("relevance_score") or 0)>=frl]
+if fdr and isinstance(fdr,tuple) and len(fdr)==2:
+    flt=[a for a in flt if (d:=_parse_date(a.get("published_at",""))) and fdr[0]<=d<=fdr[1]]
+if fk: kw=fk.lower();flt=[a for a in flt if kw in (a.get("title","")+a.get("short_summary","")).lower()]
+flt.sort(key=lambda a:a.get("relevance_score",0),reverse=True)
 
+# ══════════════════════ TAB 1: FEED ══════════════════════════════════════
+with t1:
+    # KPIs
+    k1,k2,k3,k4,k5=st.columns(5)
+    with k1: st.markdown(_kpi("Articles",total_articles,"b"),unsafe_allow_html=True)
+    with k2: st.markdown(_kpi("Runs",total_runs,"p"),unsafe_allow_html=True)
+    with k3: st.markdown(_kpi("QA Pass",qa["passed"],"g"),unsafe_allow_html=True)
+    with k4: st.markdown(_kpi("QA Fail",qa["failed"],"r"),unsafe_allow_html=True)
+    with k5: st.markdown(_kpi("Showing",f'{len(flt)}/{total_articles}',"a"),unsafe_allow_html=True)
 
-# ╔═════════════════════════════════════════════════════════════════════════╗
-# ║  SIGNAL STRIP                                                         ║
-# ╚═════════════════════════════════════════════════════════════════════════╝
-ai_level = "hi" if _ai_count >= 5 else "elev" if _ai_count >= 2 else "low"
-ai_label = "HIGH" if _ai_count >= 5 else "MODERATE" if _ai_count >= 2 else "LOW"
-geo_level = "vol" if _geo_count >= 5 else "elev" if _geo_count >= 2 else "low"
-geo_label = "ELEVATED" if _geo_count >= 2 else "CALM"
-mkt_level = "elev" if _market_count >= 3 else "low"
-mkt_label = "ACTIVE" if _market_count >= 3 else "QUIET"
-nrg_level = "elev" if _energy_count >= 2 else "low"
-nrg_label = "SENSITIVE" if _energy_count >= 2 else "STABLE"
-brk_level = "vol" if _breaking_count >= 2 else "elev" if _breaking_count >= 1 else "low"
+    # Predictive outlook
+    st.markdown('<hr class="sd">',unsafe_allow_html=True)
+    st.markdown(_sh("Next 6H / 24H Outlook","Predictive intelligence from current signals"),unsafe_allow_html=True)
+    o=outlook
+    p1,p2,p3,p4,p5=st.columns(5)
+    with p1: st.markdown(_pd("Escalation Risk",o["escalation_risk"]["level"],o["escalation_risk"]["detail"],o["escalation_risk"]["score"]),unsafe_allow_html=True)
+    with p2: st.markdown(_pd("Market Reaction",o["market_reaction"]["level"],o["market_reaction"]["detail"],o["market_reaction"]["score"]),unsafe_allow_html=True)
+    with p3: st.markdown(_pd("AI Momentum",o["ai_momentum"]["level"],o["ai_momentum"]["detail"],o["ai_momentum"]["score"]),unsafe_allow_html=True)
+    with p4: st.markdown(_pd("Supply Chain",o["supply_chain_risk"]["level"],o["supply_chain_risk"]["detail"],o["supply_chain_risk"]["score"]),unsafe_allow_html=True)
+    with p5: st.markdown(_pd("Energy Sens.",o["energy_sensitivity"]["level"],o["energy_sensitivity"]["detail"],o["energy_sensitivity"]["score"]),unsafe_allow_html=True)
 
-st.markdown(
-    '<div class="sig-strip">'
-    + signal_pill("AI PULSE", ai_label, ai_level)
-    + signal_pill("GEO RISK", geo_label, geo_level)
-    + signal_pill("MARKETS", mkt_label, mkt_level)
-    + signal_pill("ENERGY", nrg_label, nrg_level)
-    + signal_pill("BREAKING", str(_breaking_count), brk_level)
-    + signal_pill("SOURCES", str(_source_count), "info")
-    + signal_pill("LAST SWEEP", age_str, "vol" if freshness["is_stale"] else "info")
-    + signal_pill("NEW ARTICLES", str(freshness["last_sweep_article_count"]), "info")
-    + '</div>',
-    unsafe_allow_html=True,
-)
+    # Watchlist
+    wl=o.get("watchlist",[])
+    if wl:
+        with st.expander(f"Watchlist ({len(wl)} items) · Confidence: {o['overall_confidence']:.0%}"):
+            for w in wl: st.markdown(f"- {w}")
 
+    # Hero + actionable panels
+    st.markdown('<hr class="sd">',unsafe_allow_html=True)
+    st.markdown(_sh("Most Important Right Now","Priority intelligence"),unsafe_allow_html=True)
+    if flt:
+        st.markdown(_hero(flt[0]),unsafe_allow_html=True)
+        brk=[a for a in flt if a.get("urgency")=="breaking"]
+        ail=[a for a in flt if a.get("category") in ("AI","AI Coding","AI Trading")]
+        mrl=[a for a in flt if a.get("market_impact")=="high"]
+        gpl=[a for a in flt if a.get("category") in ("Geopolitics","Military / Security")]
+        x1,x2,x3,x4=st.columns(4)
+        with x1: st.markdown(_sec("BREAKING","lb",brk[0] if brk else None),unsafe_allow_html=True)
+        with x2: st.markdown(_sec("AI OPPORTUNITY","la",ail[0] if ail else None),unsafe_allow_html=True)
+        with x3: st.markdown(_sec("MARKET RISK","lr",mrl[0] if mrl else None),unsafe_allow_html=True)
+        with x4: st.markdown(_sec("GEO CATALYST","lm",gpl[0] if gpl else None),unsafe_allow_html=True)
+    else: st.info("No articles. Run `python main.py`.")
 
-# ╔═════════════════════════════════════════════════════════════════════════╗
-# ║  TABS                                                                 ║
-# ╚═════════════════════════════════════════════════════════════════════════╝
-tab_feed, tab_macro = st.tabs(["INTELLIGENCE FEED", "MACRO INTELLIGENCE"])
+    # Category sections
+    st.markdown('<hr class="sd">',unsafe_allow_html=True)
+    def _rs(title,items,mx=4):
+        if not items: return
+        st.markdown(_sh(title,f"{len(items)} articles"),unsafe_allow_html=True)
+        for a in items[:mx]: st.markdown(_ac(a),unsafe_allow_html=True)
+        if len(items)>mx:
+            with st.expander(f"Show {len(items)-mx} more"):
+                for a in items[mx:]: st.markdown(_ac(a),unsafe_allow_html=True)
 
+    for cat in ["Breaking News","AI","AI Coding","AI Trading","Geopolitics","Military / Security","Markets","Crypto","Energy","Shipping / Supply Chain","Natural Disasters","Global News"]:
+        items=[a for a in flt if a.get("category")==cat] if cat!="Breaking News" else [a for a in flt if a.get("urgency")=="breaking"]
+        _rs(cat,items)
 
-# ═══════════════════════════ TAB 1: FEED ═════════════════════════════════
-with tab_feed:
+    # Plotly charts
+    st.markdown('<hr class="sd">',unsafe_allow_html=True)
+    st.markdown(_sh("Analytics","Distribution & trends"),unsafe_allow_html=True)
+    if flt:
+        c1,c2=st.columns(2)
+        with c1:
+            cc2=Counter(a.get("category","?") for a in flt)
+            df=pd.DataFrame(cc2.most_common(12),columns=["Category","Count"])
+            fig=px.bar(df,x="Count",y="Category",orientation="h",title="Category Distribution")
+            st.plotly_chart(_plotly_dark(fig),use_container_width=True)
+        with c2:
+            tc=Counter(t for a in flt for t in a.get("tags",[]))
+            if tc:
+                df2=pd.DataFrame(tc.most_common(12),columns=["Topic","Count"])
+                fig2=px.bar(df2,x="Count",y="Topic",orientation="h",title="Topic Frequency")
+                st.plotly_chart(_plotly_dark(fig2),use_container_width=True)
+        c3,c4=st.columns(2)
+        with c3:
+            uc=Counter(a.get("urgency","low") for a in flt)
+            df3=pd.DataFrame(list(uc.items()),columns=["Urgency","Count"])
+            colors={"breaking":"#FF5252","high":"#FFB800","medium":"#00D4FF","low":"#1A3050"}
+            fig3=px.pie(df3,values="Count",names="Urgency",title="Urgency Distribution",color="Urgency",color_discrete_map=colors,hole=.4)
+            st.plotly_chart(_plotly_dark(fig3),use_container_width=True)
+        with c4:
+            rc=Counter(a.get("region","Global") for a in flt)
+            df4=pd.DataFrame(rc.most_common(8),columns=["Region","Count"])
+            fig4=px.bar(df4,x="Count",y="Region",orientation="h",title="Region Impact")
+            st.plotly_chart(_plotly_dark(fig4),use_container_width=True)
 
-    # Apply filters
-    filtered = all_articles
-    if f_categories:
-        filtered = [a for a in filtered if a.get("category") in f_categories]
-    if f_regions:
-        filtered = [a for a in filtered if a.get("region") in f_regions]
-    if f_sources:
-        filtered = [a for a in filtered if a.get("source") in f_sources]
-    if f_urgency:
-        filtered = [a for a in filtered if a.get("urgency") in f_urgency]
-    if f_relevance > 0:
-        filtered = [a for a in filtered if (a.get("relevance_score") or 0) >= f_relevance]
-    if f_date_range and isinstance(f_date_range, tuple) and len(f_date_range) == 2:
-        d_start, d_end = f_date_range
-        filtered = [a for a in filtered if (d := _parse_date(a.get("published_at", ""))) and d_start <= d <= d_end]
-    if f_keyword:
-        kw = f_keyword.lower()
-        filtered = [a for a in filtered if kw in (a.get("title", "") + " " + a.get("short_summary", "")).lower()]
-    filtered.sort(key=lambda a: a.get("relevance_score", 0), reverse=True)
+# ══════════════════════ TAB 2: WORLD MAP ═════════════════════════════════
+with t2:
+    st.markdown(_sh("World Intelligence Map","Global event distribution"),unsafe_allow_html=True)
+    if flt:
+        map_data=[]
+        for a in flt:
+            lat,lon=infer_coordinates(a)
+            urg=a.get("urgency","low")
+            sz={"breaking":14,"high":10,"medium":7,"low":5}.get(urg,5)
+            map_data.append({"lat":lat,"lon":lon,"title":a["title"][:80],"category":a.get("category",""),"urgency":urg,"region":a.get("region",""),"relevance":a.get("relevance_score",0),"size":sz,"source":a.get("source","")})
+        mdf=pd.DataFrame(map_data)
+        cat_colors={"AI":"#00D4FF","AI Coding":"#4ECDC4","AI Trading":"#45B7D1","Geopolitics":"#FFB800","Military / Security":"#FF5252","Markets":"#BB86FC","Crypto":"#96CEB4","Energy":"#FFEAA7","Shipping / Supply Chain":"#FF6B6B","Natural Disasters":"#E17055","Global News":"#636e72","Breaking News":"#FF5252","Sanctions":"#fd79a8","Infrastructure":"#a29bfe"}
+        fig_map=px.scatter_geo(mdf,lat="lat",lon="lon",color="category",size="size",hover_name="title",hover_data={"urgency":True,"region":True,"relevance":":.0%","lat":False,"lon":False,"size":False},title="",color_discrete_map=cat_colors,size_max=16)
+        fig_map.update_geos(bgcolor="rgba(0,0,0,0)",landcolor="#0A1525",oceancolor="#060A12",lakecolor="#060A12",coastlinecolor="#1A3050",countrycolor="#0F1A2E",showframe=False,projection_type="natural earth")
+        fig_map.update_layout(paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",font=dict(color="#6B9CC0",size=10),margin=dict(l=0,r=0,t=10,b=0),height=500,legend=dict(bgcolor="rgba(0,0,0,0)",font=dict(size=9)))
+        st.plotly_chart(fig_map,use_container_width=True)
 
-    # ── KPI cards ──
-    k1, k2, k3, k4, k5 = st.columns(5)
-    with k1:
-        st.markdown(kpi("Total Articles", total_articles, "b"), unsafe_allow_html=True)
-    with k2:
-        st.markdown(kpi("Pipeline Runs", total_runs, "p"), unsafe_allow_html=True)
-    with k3:
-        st.markdown(kpi("QA Passed", qa_stats["passed"], "g"), unsafe_allow_html=True)
-    with k4:
-        st.markdown(kpi("QA Failed", qa_stats["failed"], "r"), unsafe_allow_html=True)
-    with k5:
-        st.markdown(kpi("Showing", f'{len(filtered)}/{total_articles}', "a"), unsafe_allow_html=True)
+        # Region breakdown
+        st.markdown('<hr class="sd">',unsafe_allow_html=True)
+        st.markdown(_sh("Regional Breakdown","Event concentration by region"),unsafe_allow_html=True)
+        rc2=Counter(a.get("region","Global") for a in flt)
+        rcols=st.columns(min(len(rc2),7))
+        for i,(reg,cnt) in enumerate(rc2.most_common(7)):
+            with rcols[i]: st.markdown(_kpi(reg,cnt,"b"),unsafe_allow_html=True)
+    else: st.info("No articles to map.")
 
-    st.markdown('<hr class="sd">', unsafe_allow_html=True)
-
-    # ── Most Important Right Now ──
-    st.markdown(section_header("Most Important Right Now", "Priority intelligence from the latest sweep"), unsafe_allow_html=True)
-
-    if filtered:
-        # Hero: top story (full width)
-        st.markdown(hero_card(filtered[0]), unsafe_allow_html=True)
-
-        # Secondary row: breaking / AI opportunity / geo risk
-        breaking_list = [a for a in filtered if a.get("urgency") == "breaking"]
-        ai_list = [a for a in filtered if a.get("category") in ("AI", "AI Coding", "AI Trading")]
-        risk_list = [a for a in filtered if a.get("market_impact") == "high"]
-
-        sc1, sc2, sc3 = st.columns(3)
-        with sc1:
-            st.markdown(secondary_card("BREAKING", "l-brk", breaking_list[0] if breaking_list else None), unsafe_allow_html=True)
-        with sc2:
-            st.markdown(secondary_card("AI OPPORTUNITY", "l-ai", ai_list[0] if ai_list else None), unsafe_allow_html=True)
-        with sc3:
-            st.markdown(secondary_card("MARKET / GEO RISK", "l-risk", risk_list[0] if risk_list else None), unsafe_allow_html=True)
+# ══════════════════════ TAB 3: MACRO INTEL ═══════════════════════════════
+with t3:
+    if not bdata:
+        st.info("No macro briefing. Run `python main.py`.")
     else:
-        st.info("No articles match current filters. Run `python main.py` to collect intelligence.")
-
-    st.markdown('<hr class="sd">', unsafe_allow_html=True)
-
-    # ── Category sections ──
-    def _render_section(title, items, max_items=5):
-        if not items:
-            return
-        st.markdown(section_header(title, f"{len(items)} articles"), unsafe_allow_html=True)
-        for a in items[:max_items]:
-            st.markdown(article_card(a), unsafe_allow_html=True)
-        if len(items) > max_items:
-            with st.expander(f"Show {len(items) - max_items} more"):
-                for a in items[max_items:]:
-                    st.markdown(article_card(a), unsafe_allow_html=True)
-
-    _render_section("Breaking News", [a for a in filtered if a.get("urgency") == "breaking"])
-    _render_section("AI News", [a for a in filtered if a.get("category") == "AI"])
-    _render_section("AI Coding", [a for a in filtered if a.get("category") == "AI Coding"])
-    _render_section("AI Trading", [a for a in filtered if a.get("category") == "AI Trading"])
-    _render_section("Global News", [a for a in filtered if a.get("category") == "Global News"])
-    _render_section("Geopolitics", [a for a in filtered if a.get("category") == "Geopolitics"])
-    _render_section("Markets", [a for a in filtered if a.get("category") == "Markets"])
-    _render_section("Energy", [a for a in filtered if a.get("category") == "Energy"])
-
-    st.markdown('<hr class="sd">', unsafe_allow_html=True)
-
-    # ── Trends & Insights ──
-    st.markdown(section_header("Trends & Insights", "Distribution analysis"), unsafe_allow_html=True)
-    if filtered:
-        ch1, ch2 = st.columns(2)
-        with ch1:
-            st.markdown("##### Category Distribution")
-            cat_counts = Counter(a.get("category", "Unknown") for a in filtered)
-            df_cats = pd.DataFrame(cat_counts.most_common(10), columns=["Category", "Count"])
-            st.bar_chart(df_cats, x="Category", y="Count", color="#00D4FF")
-        with ch2:
-            st.markdown("##### Topic Frequency")
-            tag_counter = Counter()
-            for a in filtered:
-                for t in a.get("tags", []):
-                    tag_counter[t] += 1
-            if tag_counter:
-                df_tags = pd.DataFrame(tag_counter.most_common(12), columns=["Topic", "Count"])
-                st.bar_chart(df_tags, x="Topic", y="Count", color="#FFB800", horizontal=True)
-            else:
-                st.info("No topic tags detected.")
-
-
-# ═══════════════════════ TAB 2: MACRO INTEL ══════════════════════════════
-with tab_macro:
-
-    if not briefing_data:
-        st.info("No macro briefing available yet. Run `python main.py` to generate one.")
-    else:
-        b = briefing_data
-
-        # ── Macro KPIs ──
-        m1, m2, m3, m4, m5 = st.columns(5)
-        with m1:
-            st.markdown(kpi("Top Theme", b.get("top_theme", "—"), "a"), unsafe_allow_html=True)
+        b=bdata
+        m1,m2,m3,m4,m5=st.columns(5)
+        with m1: st.markdown(_kpi("Theme",b.get("top_theme","—"),"a"),unsafe_allow_html=True)
         with m2:
-            rl = b.get("overall_risk_level", "low")
-            rc = "r" if rl == "high" else "a" if rl == "medium" else "g"
-            st.markdown(kpi("Risk Level", rl.upper(), rc), unsafe_allow_html=True)
-        with m3:
-            st.markdown(kpi("Confidence", f'{b.get("overall_confidence", 0):.0%}', "b"), unsafe_allow_html=True)
-        with m4:
-            st.markdown(kpi("Assets Hit", len(b.get("asset_views", [])), "p"), unsafe_allow_html=True)
-        with m5:
-            st.markdown(kpi("Rules Fired", b.get("rule_triggers", 0), "b"), unsafe_allow_html=True)
+            rl=b.get("overall_risk_level","low");rc="r" if rl=="high" else "a" if rl=="medium" else "g"
+            st.markdown(_kpi("Risk",rl.upper(),rc),unsafe_allow_html=True)
+        with m3: st.markdown(_kpi("Confidence",f'{b.get("overall_confidence",0):.0%}',"b"),unsafe_allow_html=True)
+        with m4: st.markdown(_kpi("Assets",len(b.get("asset_views",[])),"p"),unsafe_allow_html=True)
+        with m5: st.markdown(_kpi("Rules",b.get("rule_triggers",0),"b"),unsafe_allow_html=True)
+        st.markdown('<hr class="sd">',unsafe_allow_html=True)
 
-        st.markdown('<hr class="sd">', unsafe_allow_html=True)
+        st.markdown(_sh("Executive Summary","Macro intelligence briefing"),unsafe_allow_html=True)
+        e1,e2=st.columns(2)
+        with e1:
+            st.markdown(_bf("What Happened","<br>".join(f"&bull; {h}" for h in b.get("what_happened",[]))),unsafe_allow_html=True)
+            st.markdown(_bf("Market Reaction",b.get("market_reaction","")),unsafe_allow_html=True)
+            st.markdown(_bf("My Market Read",b.get("market_read","")),unsafe_allow_html=True)
+        with e2:
+            st.markdown(_bf("Probable Direction",b.get("probable_direction","")),unsafe_allow_html=True)
+            st.markdown(_bf("Why It Matters",b.get("why_it_matters","")),unsafe_allow_html=True)
+            wt=b.get("what_to_watch",[])
+            st.markdown(_bf("What To Watch","<br>".join(f"&bull; {w}" for w in wt) if wt else "—"),unsafe_allow_html=True)
+        st.markdown(_bf("Conclusion",b.get("conclusion","")),unsafe_allow_html=True)
+        st.markdown('<hr class="sd">',unsafe_allow_html=True)
 
-        # ── Executive Summary ──
-        st.markdown(section_header("Executive Summary", "Macro intelligence briefing"), unsafe_allow_html=True)
-        es1, es2 = st.columns(2)
-        with es1:
-            st.markdown(briefing_card("What Happened", "<br>".join(f"&bull; {h}" for h in b.get("what_happened", []))), unsafe_allow_html=True)
-            st.markdown(briefing_card("Market Reaction", b.get("market_reaction", "")), unsafe_allow_html=True)
-            st.markdown(briefing_card("My Market Read", b.get("market_read", "")), unsafe_allow_html=True)
-        with es2:
-            st.markdown(briefing_card("Probable Direction", b.get("probable_direction", "")), unsafe_allow_html=True)
-            st.markdown(briefing_card("Why It Matters", b.get("why_it_matters", "")), unsafe_allow_html=True)
-            watch = b.get("what_to_watch", [])
-            st.markdown(briefing_card("What To Watch Now", "<br>".join(f"&bull; {w}" for w in watch) if watch else "No specific items."), unsafe_allow_html=True)
+        st.markdown(_sh("Scenario Analysis","Probabilistic outcomes"),unsafe_allow_html=True)
+        sc=b.get("scenarios",{})
+        s1,s2,s3=st.columns(3)
+        with s1: st.markdown(_sn("Bull Case",sc.get("bull_case","—"),"bu"),unsafe_allow_html=True)
+        with s2: st.markdown(_sn("Base Case",sc.get("base_case","—"),"ba"),unsafe_allow_html=True)
+        with s3: st.markdown(_sn("Risk Case",sc.get("risk_case","—"),"ri"),unsafe_allow_html=True)
+        st.markdown('<hr class="sd">',unsafe_allow_html=True)
 
-        st.markdown(briefing_card("Conclusion", b.get("conclusion", "")), unsafe_allow_html=True)
-
-        st.markdown('<hr class="sd">', unsafe_allow_html=True)
-
-        # ── Scenario Analysis ──
-        st.markdown(section_header("Scenario Analysis", "Probabilistic outcome mapping"), unsafe_allow_html=True)
-        sc1, sc2, sc3 = st.columns(3)
-        scenarios = b.get("scenarios", {})
-        with sc1:
-            st.markdown(scenario_card("Bull Case", scenarios.get("bull_case", "—"), "bull"), unsafe_allow_html=True)
-        with sc2:
-            st.markdown(scenario_card("Base Case", scenarios.get("base_case", "—"), "base"), unsafe_allow_html=True)
-        with sc3:
-            st.markdown(scenario_card("Risk Case", scenarios.get("risk_case", "—"), "risk"), unsafe_allow_html=True)
-
-        st.markdown('<hr class="sd">', unsafe_allow_html=True)
-
-        # ── Asset Breakdown ──
-        asset_views = b.get("asset_views", [])
-        st.markdown(section_header("Asset-Class Breakdown", f"{len(asset_views)} assets impacted"), unsafe_allow_html=True)
-
-        acol1, acol2, acol3 = st.columns(3)
-        with acol1:
-            f_asset_dir = st.multiselect("Direction", options=["up", "down", "volatile", "neutral"], default=[], placeholder="All", key="macro_dir")
-        with acol2:
-            all_asset_labels = sorted(set(v.get("label", "") for v in asset_views))
-            f_asset_class = st.multiselect("Asset", options=all_asset_labels, default=[], placeholder="All", key="macro_asset")
-        with acol3:
-            f_min_conf = st.slider("Min confidence", 0.0, 1.0, 0.0, 0.05, key="macro_conf")
-
-        fv = asset_views
-        if f_asset_dir:
-            fv = [v for v in fv if v.get("direction") in f_asset_dir]
-        if f_asset_class:
-            fv = [v for v in fv if v.get("label") in f_asset_class]
-        if f_min_conf > 0:
-            fv = [v for v in fv if v.get("confidence", 0) >= f_min_conf]
-
+        av=b.get("asset_views",[])
+        st.markdown(_sh("Asset Breakdown",f"{len(av)} assets"),unsafe_allow_html=True)
+        ac1,ac2,ac3=st.columns(3)
+        with ac1: fad=st.multiselect("Direction",["up","down","volatile","neutral"],default=[],placeholder="All",key="md")
+        with ac2:
+            als=sorted(set(v.get("label","") for v in av))
+            fac=st.multiselect("Asset",als,default=[],placeholder="All",key="ma")
+        with ac3: fmc=st.slider("Min confidence",0.0,1.0,0.0,0.05,key="mc")
+        fv=av
+        if fad: fv=[v for v in fv if v.get("direction") in fad]
+        if fac: fv=[v for v in fv if v.get("label") in fac]
+        if fmc>0: fv=[v for v in fv if v.get("confidence",0)>=fmc]
         if fv:
-            left_col, right_col = st.columns(2)
-            for i, v in enumerate(fv):
-                with left_col if i % 2 == 0 else right_col:
-                    st.markdown(asset_card_html(v), unsafe_allow_html=True)
-        else:
-            st.info("No asset views match filters.")
+            lc,rc=st.columns(2)
+            for i,v in enumerate(fv):
+                with lc if i%2==0 else rc: st.markdown(_asc(v),unsafe_allow_html=True)
+        else: st.info("No assets match.")
+        st.markdown('<hr class="sd">',unsafe_allow_html=True)
 
-        st.markdown('<hr class="sd">', unsafe_allow_html=True)
+        at=b.get("all_themes",[])
+        if at:
+            st.markdown(_sh("Active Themes","Detected narratives"),unsafe_allow_html=True)
+            df_t=pd.DataFrame(at)
+            if not df_t.empty:
+                fig_t=px.bar(df_t,x="count",y="theme",orientation="h",title="Theme Distribution")
+                st.plotly_chart(_plotly_dark(fig_t),use_container_width=True)
 
-        # ── Theme Distribution ──
-        all_themes = b.get("all_themes", [])
-        if all_themes:
-            st.markdown(section_header("Active Themes", "Detected macro narratives"), unsafe_allow_html=True)
-            df_themes = pd.DataFrame(all_themes)
-            if not df_themes.empty:
-                st.bar_chart(df_themes, x="theme", y="count", color="#BB86FC")
-
-
-# ╔═════════════════════════════════════════════════════════════════════════╗
-# ║  FOOTER                                                               ║
-# ╚═════════════════════════════════════════════════════════════════════════╝
-st.markdown('<hr class="sd">', unsafe_allow_html=True)
-now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-refresh_status = f"Auto: {interval_label}" if refresh_seconds > 0 else "Manual"
-st.markdown(
-    f'<div class="ftr">'
-    f'{len(all_articles)} articles &nbsp;&middot;&nbsp; '
-    f'{now_utc} UTC &nbsp;&middot;&nbsp; '
-    f'Refresh: {refresh_status} &nbsp;&middot;&nbsp; '
-    f'{mode_label} mode'
-    f'</div>',
-    unsafe_allow_html=True,
-)
+# ═══════════════════════ FOOTER ══════════════════════════════════════════
+st.markdown('<hr class="sd">',unsafe_allow_html=True)
+now_utc=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+rfs=f"Auto: {il}" if rs>0 else "Manual"
+st.markdown(f'<div class="ftr">{len(all_articles)} articles · {now_utc} UTC · Refresh: {rfs} · {ml} mode</div>',unsafe_allow_html=True)
