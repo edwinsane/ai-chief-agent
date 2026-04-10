@@ -307,3 +307,60 @@ def get_briefings(limit: int = 20) -> list[dict]:
             d["data"] = {}
         results.append(d)
     return results
+
+
+# ---------------------------------------------------------------------------
+# Freshness helpers
+# ---------------------------------------------------------------------------
+
+def get_freshness_info() -> dict:
+    """Return freshness diagnostics for the dashboard."""
+    conn = _get_connection()
+
+    # Last run timestamp
+    last_run_row = conn.execute("SELECT created_at FROM runs ORDER BY id DESC LIMIT 1").fetchone()
+    last_run_ts = last_run_row["created_at"] if last_run_row else None
+
+    # Articles from the latest run
+    last_run_id_row = conn.execute("SELECT id FROM runs ORDER BY id DESC LIMIT 1").fetchone()
+    last_run_id = last_run_id_row["id"] if last_run_id_row else 0
+    last_run_article_count = 0
+    if last_run_id:
+        row = conn.execute("SELECT COUNT(*) FROM articles WHERE run_id = ?", (last_run_id,)).fetchone()
+        last_run_article_count = row[0] if row else 0
+
+    # Total runs
+    total_runs = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+
+    # Distinct sources from latest run
+    sources = []
+    if last_run_id:
+        rows = conn.execute(
+            "SELECT DISTINCT source FROM articles WHERE run_id = ? AND source != ''",
+            (last_run_id,),
+        ).fetchall()
+        sources = [r["source"] for r in rows]
+
+    conn.close()
+
+    # Compute staleness
+    hours_since_sweep = None
+    is_stale = False
+    if last_run_ts:
+        try:
+            last_dt = datetime.fromisoformat(last_run_ts)
+            now = datetime.now(timezone.utc)
+            delta = now - last_dt
+            hours_since_sweep = round(delta.total_seconds() / 3600, 1)
+            is_stale = hours_since_sweep >= 1.0
+        except (ValueError, TypeError):
+            pass
+
+    return {
+        "last_sweep_ts": last_run_ts,
+        "last_sweep_article_count": last_run_article_count,
+        "last_sweep_sources": sources,
+        "total_runs": total_runs,
+        "hours_since_sweep": hours_since_sweep,
+        "is_stale": is_stale,
+    }

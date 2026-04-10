@@ -57,66 +57,94 @@ ASSET_CLASSES: dict[str, dict] = {
 # ---------------------------------------------------------------------------
 
 KEYWORD_ASSET_MAP: list[dict] = [
-    # --- Middle East / Iran ---
-    {"keywords": ["iran", "tehran", "irgc", "hormuz", "strait of hormuz"],
-     "assets": {"crude_oil": "up", "gold": "up", "sp500": "down", "defense_sector": "up", "energy_sector": "up"},
-     "theme": "Middle East escalation", "risk_level": "high"},
+    # === GLOBAL CONFLICT / MILITARY ===
+    {"keywords": ["armed conflict", "military operation", "invasion", "airstrike", "troop deployment", "drone strike"],
+     "assets": {"crude_oil": "up", "gold": "up", "sp500": "down", "defense_sector": "up"},
+     "theme": "Armed conflict / military action", "risk_level": "high"},
 
-    {"keywords": ["ceasefire", "peace talk", "de-escalat", "diplomatic"],
+    {"keywords": ["ceasefire", "peace talk", "de-escalat", "diplomatic resolution", "peace agreement"],
      "assets": {"crude_oil": "down", "gold": "down", "sp500": "up", "defense_sector": "down"},
      "theme": "De-escalation / ceasefire", "risk_level": "medium"},
+
+    {"keywords": ["nuclear threat", "nuclear test", "nuclear weapon", "nuclear deal"],
+     "assets": {"gold": "up", "sp500": "down", "defense_sector": "up", "crude_oil": "up"},
+     "theme": "Nuclear risk escalation", "risk_level": "high"},
+
+    {"keywords": ["cyberattack", "cyber warfare", "ransomware", "infrastructure attack"],
+     "assets": {"sp500": "down", "gold": "up"},
+     "theme": "Cyber / infrastructure threat", "risk_level": "high"},
+
+    {"keywords": ["terror attack", "terrorist", "mass casualty"],
+     "assets": {"sp500": "down", "gold": "up", "defense_sector": "up"},
+     "theme": "Terror / security event", "risk_level": "high"},
+
+    # === REGIONAL (triggered by events, not by default) ===
+    {"keywords": ["iran", "tehran", "irgc", "hormuz", "strait of hormuz"],
+     "assets": {"crude_oil": "up", "gold": "up", "sp500": "down", "defense_sector": "up", "energy_sector": "up"},
+     "theme": "Middle East oil supply risk", "risk_level": "high"},
 
     {"keywords": ["israel", "gaza", "lebanon", "hezbollah", "hamas"],
      "assets": {"crude_oil": "up", "gold": "up", "sp500": "volatile", "defense_sector": "up"},
      "theme": "Israel-regional conflict", "risk_level": "high"},
 
-    # --- Russia / Ukraine ---
-    {"keywords": ["ukraine", "russia", "kremlin", "putin", "nato escalat"],
+    {"keywords": ["ukraine", "russia", "kremlin", "putin"],
      "assets": {"crude_oil": "up", "gold": "up", "grains": "up", "sp500": "down", "defense_sector": "up", "energy_sector": "up"},
      "theme": "Russia-Ukraine conflict", "risk_level": "high"},
 
-    # --- China / Taiwan ---
-    {"keywords": ["taiwan strait", "china military", "south china sea", "china sanction"],
+    {"keywords": ["taiwan strait", "china military", "south china sea"],
      "assets": {"sp500": "down", "crypto": "volatile", "gold": "up", "defense_sector": "up"},
      "theme": "China-Taiwan tensions", "risk_level": "high"},
 
-    # --- Fed / rates ---
-    {"keywords": ["federal reserve", "fed rate", "interest rate", "rate hike", "rate cut", "fomc", "powell"],
+    # === MONETARY POLICY / MACRO ===
+    {"keywords": ["federal reserve", "interest rate", "fomc", "powell", "central bank"],
      "assets": {"sp500": "volatile", "gold": "volatile", "crypto": "volatile"},
-     "theme": "Fed monetary policy", "risk_level": "medium"},
+     "theme": "Central bank policy", "risk_level": "medium"},
 
-    {"keywords": ["rate cut", "dovish", "easing"],
+    {"keywords": ["rate cut", "dovish", "easing", "stimulus"],
      "assets": {"sp500": "up", "gold": "up", "crypto": "up"},
-     "theme": "Dovish pivot", "risk_level": "low"},
+     "theme": "Dovish pivot / easing", "risk_level": "low"},
 
     {"keywords": ["rate hike", "hawkish", "tightening"],
      "assets": {"sp500": "down", "gold": "down", "crypto": "down"},
      "theme": "Hawkish tightening", "risk_level": "medium"},
 
-    # --- Oil / OPEC ---
+    # === SANCTIONS / TRADE ===
+    {"keywords": ["sanction", "trade war", "tariff", "embargo", "export ban", "trade restriction"],
+     "assets": {"sp500": "down", "gold": "up", "crude_oil": "up", "grains": "up"},
+     "theme": "Sanctions / trade disruption", "risk_level": "high"},
+
+    # === ENERGY / SUPPLY ===
     {"keywords": ["opec", "opec+", "oil production", "oil cut", "crude inventory"],
      "assets": {"crude_oil": "volatile", "energy_sector": "volatile"},
-     "theme": "OPEC supply dynamics", "risk_level": "medium"},
+     "theme": "OPEC / energy supply", "risk_level": "medium"},
 
-    # --- Sanctions / trade ---
-    {"keywords": ["sanction", "trade war", "tariff", "embargo", "export ban"],
-     "assets": {"sp500": "down", "gold": "up", "crude_oil": "up", "grains": "up"},
-     "theme": "Sanctions / trade restrictions", "risk_level": "high"},
+    {"keywords": ["shipping lane", "suez canal", "panama canal", "port closure", "maritime security"],
+     "assets": {"crude_oil": "up", "grains": "up", "sp500": "down"},
+     "theme": "Shipping / waterway disruption", "risk_level": "high"},
 
-    # --- Crypto specific ---
-    {"keywords": ["bitcoin", "ethereum", "crypto regulation", "sec crypto", "stablecoin"],
+    {"keywords": ["supply chain", "chip shortage", "semiconductor shortage", "logistics crisis"],
+     "assets": {"sp500": "down"},
+     "theme": "Supply chain disruption", "risk_level": "medium"},
+
+    # === CRYPTO ===
+    {"keywords": ["bitcoin", "ethereum", "crypto regulation", "sec crypto", "stablecoin", "crypto exchange"],
      "assets": {"crypto": "volatile"},
-     "theme": "Crypto regulation / market", "risk_level": "medium"},
+     "theme": "Crypto markets / regulation", "risk_level": "medium"},
 
-    # --- AI / tech ---
-    {"keywords": ["artificial intelligence", "openai", "nvidia", "ai chip", "ai regulation"],
+    # === AI / TECH ===
+    {"keywords": ["artificial intelligence", "openai", "nvidia", "ai chip", "ai regulation", "ai model"],
      "assets": {"sp500": "up"},
      "theme": "AI sector momentum", "risk_level": "low"},
 
-    # --- Natural disaster / emergency ---
-    {"keywords": ["earthquake", "tsunami", "hurricane", "flood", "wildfire"],
+    # === NATURAL DISASTER ===
+    {"keywords": ["earthquake", "tsunami", "hurricane", "flood", "wildfire", "volcanic eruption", "typhoon"],
      "assets": {"sp500": "down", "gold": "up", "crude_oil": "volatile"},
      "theme": "Natural disaster", "risk_level": "medium"},
+
+    # === INFRASTRUCTURE ===
+    {"keywords": ["power outage", "grid failure", "internet outage", "pipeline explosion", "dam failure"],
+     "assets": {"sp500": "down", "energy_sector": "volatile"},
+     "theme": "Infrastructure disruption", "risk_level": "medium"},
 
     # --- Inflation ---
     {"keywords": ["inflation", "cpi", "ppi", "consumer price"],
@@ -130,10 +158,30 @@ KEYWORD_ASSET_MAP: list[dict] = [
 # ---------------------------------------------------------------------------
 
 SCENARIO_TEMPLATES: dict[str, dict[str, str]] = {
-    "Middle East escalation": {
-        "bull_case": "Ceasefire holds or diplomacy succeeds — crude retraces, risk assets recover, defense gives back gains.",
-        "base_case": "Tensions persist but contained — crude elevated, gold bid, equities choppy with defense outperforming.",
-        "risk_case": "Escalation into direct conflict or Hormuz disruption — crude spikes, broad risk-off, flight to gold and USD.",
+    "Armed conflict / military action": {
+        "bull_case": "Conflict contained and ceasefire reached — risk premium unwinds, equities recover, commodities retrace.",
+        "base_case": "Hostilities continue but localized — defense outperforms, commodities elevated, equities range-bound.",
+        "risk_case": "Escalation or spillover to major powers — severe risk-off, flight to gold and USD, energy spikes.",
+    },
+    "Nuclear risk escalation": {
+        "bull_case": "Diplomatic resolution, test moratorium — risk premium unwinds rapidly.",
+        "base_case": "Rhetoric stays elevated but no action — markets adapt, defense bid persists.",
+        "risk_case": "Actual test or deployment threat — extreme risk-off, gold surges, equities crater.",
+    },
+    "Cyber / infrastructure threat": {
+        "bull_case": "Attack contained, systems restored — markets shrug off after initial dip.",
+        "base_case": "Ongoing cyber campaign — cybersecurity stocks bid, broad markets nervous.",
+        "risk_case": "Critical infrastructure compromised — cascading failures, economic disruption.",
+    },
+    "Terror / security event": {
+        "bull_case": "Isolated incident, rapid response — markets recover within sessions.",
+        "base_case": "Heightened alert status — defense bid, travel and consumer discretionary pressured.",
+        "risk_case": "Coordinated multi-site attack — sustained risk-off, policy response uncertainty.",
+    },
+    "Middle East oil supply risk": {
+        "bull_case": "Diplomacy succeeds — crude retraces, risk assets recover, defense gives back gains.",
+        "base_case": "Tensions persist but contained — crude elevated, gold bid, equities choppy.",
+        "risk_case": "Strait of Hormuz disruption — crude spikes, broad risk-off, flight to gold and USD.",
     },
     "De-escalation / ceasefire": {
         "bull_case": "Ceasefire becomes durable peace — crude drops sharply, risk-on rally, defense sector fades.",
@@ -170,10 +218,30 @@ SCENARIO_TEMPLATES: dict[str, dict[str, str]] = {
         "base_case": "Gradual tightening continues — equities grind lower, credit spreads widen.",
         "risk_case": "Overtightening causes recession — sharp equity decline, flight to bonds and gold.",
     },
-    "Sanctions / trade restrictions": {
+    "Sanctions / trade disruption": {
         "bull_case": "Sanctions eased or circumvented — supply normalizes, risk premium fades.",
         "base_case": "Sanctions persist — affected commodities stay elevated, trade rerouting continues.",
         "risk_case": "Escalation to secondary sanctions — broader supply disruption, inflationary pressure.",
+    },
+    "Shipping / waterway disruption": {
+        "bull_case": "Route reopens or rerouting succeeds — freight rates normalize, supply resumes.",
+        "base_case": "Disruption persists — elevated shipping costs, commodity price pressure, longer delivery times.",
+        "risk_case": "Multiple chokepoints compromised — global trade crisis, stagflation risk, severe commodity spikes.",
+    },
+    "Supply chain disruption": {
+        "bull_case": "Bottlenecks clear, inventory rebuilds — manufacturing recovers, inflation eases.",
+        "base_case": "Partial disruption continues — select sectors impacted, cost pass-through to consumers.",
+        "risk_case": "Cascading shortages — production halts, earnings downgrades, inflationary spiral.",
+    },
+    "Infrastructure disruption": {
+        "bull_case": "Systems restored quickly — minimal economic impact, infrastructure spending accelerates.",
+        "base_case": "Partial recovery — regional economic drag, insurance and rebuild costs.",
+        "risk_case": "Widespread failure — economic paralysis in affected region, contagion risk.",
+    },
+    "Crypto markets / regulation": {
+        "bull_case": "Regulatory clarity favors adoption — crypto rallies, institutional inflows increase.",
+        "base_case": "Mixed regulatory signals — crypto volatile, market structure evolves gradually.",
+        "risk_case": "Major crackdown or exchange failure — crypto selloff, contagion to risk assets.",
     },
     "Natural disaster": {
         "bull_case": "Damage contained, rapid recovery — markets stabilize quickly.",

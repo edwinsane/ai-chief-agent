@@ -26,6 +26,7 @@ from app.storage.database import (  # noqa: E402
     get_distinct_categories,
     get_distinct_regions,
     get_distinct_sources,
+    get_freshness_info,
     get_last_run,
     get_latest_briefing,
     get_qa_stats,
@@ -334,26 +335,48 @@ def secondary_card(label, label_cls, a):
     )
 
 
+def _time_ago(iso_ts: str) -> str:
+    """Convert ISO timestamp to '2h ago' style label."""
+    if not iso_ts:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+        delta = datetime.now(timezone.utc) - dt
+        hours = delta.total_seconds() / 3600
+        if hours < 1:
+            return f"{int(delta.total_seconds() / 60)}m ago"
+        if hours < 24:
+            return f"{int(hours)}h ago"
+        return f"{int(hours / 24)}d ago"
+    except (ValueError, TypeError):
+        return ""
+
+
 def article_card(a):
-    """Standard article card with chip system."""
+    """Standard article card with chip system and freshness."""
     title = a.get("title", "Untitled")
     url = a.get("url", "")
     th = f'<a href="{url}" target="_blank">{title}</a>' if url else title
     src = a.get("source", "Unknown")
     ts = a.get("published_at", "")[:16].replace("T", " ")
+    age = _time_ago(a.get("published_at", ""))
+    age_html = f' &middot; <span style="color:#3D5A80">{age}</span>' if age else ""
     score = a.get("relevance_score", 0)
     uc = urgency_chip(a.get("urgency", "low"))
     summary = a.get("short_summary", "")
     wim = a.get("why_it_matters", "")
     wim_html = f'<div class="wim">Why it matters: {wim}</div>' if wim else ""
     cat = a.get("category", "")
+    region = a.get("region", "")
     tags = a.get("tags", [])
     chips = f'<span class="chip chip-cat">{cat}</span>' if cat else ""
+    if region and region != "Global":
+        chips += f'<span class="chip chip-tag">{region}</span>'
     chips += "".join(f'<span class="chip chip-tag">{t}</span>' for t in tags[:3])
     return (
         f'<div class="ac">'
         f'<div class="ac-top"><h4>{th}</h4><span class="ac-score">{score:.0%}</span></div>'
-        f'<div class="meta">{src} &middot; {ts} &middot; {uc}</div>'
+        f'<div class="meta">{src} &middot; {ts}{age_html} &middot; {uc}</div>'
         f'<div class="summary">{summary}</div>'
         f'{wim_html}'
         f'<div class="chips">{chips}</div>'
@@ -418,6 +441,7 @@ db_sources = get_distinct_sources()
 db_regions = get_distinct_regions()
 latest_briefing_row = get_latest_briefing()
 briefing_data = latest_briefing_row["data"] if latest_briefing_row else {}
+freshness = get_freshness_info()
 
 # Compute signal values from articles
 _cat_counts = Counter(a.get("category", "") for a in all_articles)
@@ -496,13 +520,24 @@ if refresh_seconds > 0:
 # ║  COMMAND CENTER HEADER                                                ║
 # ╚═════════════════════════════════════════════════════════════════════════╝
 sweep_ts = last_run["created_at"][:16].replace("T", " ") + " UTC" if last_run else "—"
+hours_ago = freshness["hours_since_sweep"]
+age_str = f"{hours_ago:.1f}h ago" if hours_ago is not None else "never"
 st.markdown(
     f'<div class="cmd-hdr">'
     f'<div class="title">AI <span>Chief Agent</span></div>'
-    f'<div class="meta">Last sweep: {sweep_ts} &nbsp;·&nbsp; {mode_label} mode &nbsp;·&nbsp; {news_label}</div>'
+    f'<div class="meta">Sweep: {sweep_ts} ({age_str}) &nbsp;·&nbsp; {mode_label} mode &nbsp;·&nbsp; {news_label}</div>'
     f'</div>',
     unsafe_allow_html=True,
 )
+
+# Stale data warning
+if freshness["is_stale"]:
+    st.warning(
+        f"Data may be stale — last sweep was {hours_ago:.1f} hours ago "
+        f"({freshness['last_sweep_article_count']} articles). "
+        f"Run `python main.py` to fetch fresh intelligence.",
+        icon="⚠️",
+    )
 
 
 # ╔═════════════════════════════════════════════════════════════════════════╗
@@ -526,7 +561,8 @@ st.markdown(
     + signal_pill("ENERGY", nrg_label, nrg_level)
     + signal_pill("BREAKING", str(_breaking_count), brk_level)
     + signal_pill("SOURCES", str(_source_count), "info")
-    + signal_pill("SWEEP", sweep_ts, "info")
+    + signal_pill("LAST SWEEP", age_str, "vol" if freshness["is_stale"] else "info")
+    + signal_pill("NEW ARTICLES", str(freshness["last_sweep_article_count"]), "info")
     + '</div>',
     unsafe_allow_html=True,
 )
